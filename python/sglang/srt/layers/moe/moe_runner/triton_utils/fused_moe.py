@@ -98,7 +98,300 @@ def _use_moe_sum_reduce_torch_compile(num_tokens: int) -> bool:
     return num_tokens <= 32 and not is_batch_invariant_mode_enabled()
 
 
-@register_custom_op(mutates_args=["hidden_states"])
+# -----------------------------------------------------------------------------
+# Torch.compile support: whole fused_experts_impl as custom op
+# This approach solves the problem for *all* quantization formats (FP8 included),
+# because:
+# 1. try_get_optimal_moe_config has lru_cache, so it's only called once per shape
+# 2. Any python control flow and triton JIT happens outside the compiled graph
+# 3. dynamo only sees a single custom op node, no unexpected graph breaks
+# -----------------------------------------------------------------------------
+
+def _fake_fused_experts_impl_outplace(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    b1: Optional[torch.Tensor],
+    b2: Optional[torch.Tensor],
+    use_fp8_w8a8: bool,
+    use_int8_w8a8: bool,
+    use_int8_w8a16: bool,
+    use_int4_w4a16: bool,
+    per_channel_quant: bool,
+    w1_scale: Optional[torch.Tensor],
+    w2_scale: Optional[torch.Tensor],
+    w1_zp: Optional[torch.Tensor],
+    w2_zp: Optional[torch.Tensor],
+    a1_scale: Optional[torch.Tensor],
+    a2_scale: Optional[torch.Tensor],
+    block_shape: Optional[List[int]],
+    activation: str,
+    is_gated: bool,
+    apply_router_weight_on_input: bool,
+    routed_scaling_factor: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_limit: Optional[float],
+    filter_expert: bool,
+    swiglu_limit: Optional[float],
+    gate_up_interleaved: bool,
+) -> torch.Tensor:
+    """Fake implementation for torch.compile dynamo."""
+    return hidden_states.new_empty(
+        (hidden_states.shape[0], w2.shape[1]),
+        dtype=hidden_states.dtype,
+    )
+
+
+def _fake_fused_experts_impl_inplace(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    b1: Optional[torch.Tensor],
+    b2: Optional[torch.Tensor],
+    use_fp8_w8a8: bool,
+    use_int8_w8a8: bool,
+    use_int8_w8a16: bool,
+    use_int4_w4a16: bool,
+    per_channel_quant: bool,
+    w1_scale: Optional[torch.Tensor],
+    w2_scale: Optional[torch.Tensor],
+    w1_zp: Optional[torch.Tensor],
+    w2_zp: Optional[torch.Tensor],
+    a1_scale: Optional[torch.Tensor],
+    a2_scale: Optional[torch.Tensor],
+    block_shape: Optional[List[int]],
+    activation: str,
+    is_gated: bool,
+    apply_router_weight_on_input: bool,
+    routed_scaling_factor: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_limit: Optional[float],
+    filter_expert: bool,
+    swiglu_limit: Optional[float],
+    gate_up_interleaved: bool,
+) -> None:
+    """Fake implementation for torch.compile dynamo (inplace version)."""
+    return None
+
+
+@register_custom_op(
+    op_name="fused_experts_impl_outplace",
+    mutates_args=[],
+    fake_impl=_fake_fused_experts_impl_outplace,
+)
+def fused_experts_impl_outplace(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    b1: Optional[torch.Tensor],
+    b2: Optional[torch.Tensor],
+    use_fp8_w8a8: bool,
+    use_int8_w8a8: bool,
+    use_int8_w8a16: bool,
+    use_int4_w4a16: bool,
+    per_channel_quant: bool,
+    w1_scale: Optional[torch.Tensor],
+    w2_scale: Optional[torch.Tensor],
+    w1_zp: Optional[torch.Tensor],
+    w2_zp: Optional[torch.Tensor],
+    a1_scale: Optional[torch.Tensor],
+    a2_scale: Optional[torch.Tensor],
+    block_shape: Optional[List[int]],
+    activation: str,
+    is_gated: bool,
+    apply_router_weight_on_input: bool,
+    routed_scaling_factor: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_limit: Optional[float],
+    filter_expert: bool,
+    swiglu_limit: Optional[float],
+    gate_up_interleaved: bool,
+) -> torch.Tensor:
+    """Real outplace implementation that skips dynamo tracing of the dynamic logic."""
+    return fused_experts_impl(
+        hidden_states=hidden_states,
+        w1=w1,
+        w2=w2,
+        topk_weights=topk_weights,
+        topk_ids=topk_ids,
+        b1=b1,
+        b2=b2,
+        inplace=False,
+        activation=activation,
+        is_gated=is_gated,
+        apply_router_weight_on_input=apply_router_weight_on_input,
+        use_fp8_w8a8=use_fp8_w8a8,
+        use_int8_w8a8=use_int8_w8a8,
+        use_int8_w8a16=use_int8_w8a16,
+        use_int4_w4a16=use_int4_w4a16,
+        per_channel_quant=per_channel_quant,
+        w1_scale=w1_scale,
+        w2_scale=w2_scale,
+        w1_zp=w1_zp,
+        w2_zp=w2_zp,
+        a1_scale=a1_scale,
+        a2_scale=a2_scale,
+        block_shape=block_shape,
+        routed_scaling_factor=routed_scaling_factor,
+        gemm1_alpha=gemm1_alpha,
+        gemm1_limit=gemm1_limit,
+        filter_expert=filter_expert,
+        swiglu_limit=swiglu_limit,
+        gate_up_interleaved=gate_up_interleaved,
+    )
+
+
+@register_custom_op(
+    op_name="fused_experts_impl_inplace",
+    mutates_args=["hidden_states"],
+    fake_impl=_fake_fused_experts_impl_inplace,
+)
+def fused_experts_impl_inplace(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    b1: Optional[torch.Tensor],
+    b2: Optional[torch.Tensor],
+    use_fp8_w8a8: bool,
+    use_int8_w8a8: bool,
+    use_int8_w8a16: bool,
+    use_int4_w4a16: bool,
+    per_channel_quant: bool,
+    w1_scale: Optional[torch.Tensor],
+    w2_scale: Optional[torch.Tensor],
+    w1_zp: Optional[torch.Tensor],
+    w2_zp: Optional[torch.Tensor],
+    a1_scale: Optional[torch.Tensor],
+    a2_scale: Optional[torch.Tensor],
+    block_shape: Optional[List[int]],
+    activation: str,
+    is_gated: bool,
+    apply_router_weight_on_input: bool,
+    routed_scaling_factor: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_limit: Optional[float],
+    filter_expert: bool,
+    swiglu_limit: Optional[float],
+    gate_up_interleaved: bool,
+) -> None:
+    """Real inplace implementation that skips dynamo tracing of the dynamic logic."""
+    fused_experts_impl(
+        hidden_states=hidden_states,
+        w1=w1,
+        w2=w2,
+        topk_weights=topk_weights,
+        topk_ids=topk_ids,
+        b1=b1,
+        b2=b2,
+        inplace=True,
+        activation=activation,
+        is_gated=is_gated,
+        apply_router_weight_on_input=apply_router_weight_on_input,
+        use_fp8_w8a8=use_fp8_w8a8,
+        use_int8_w8a8=use_int8_w8a8,
+        use_int8_w8a16=use_int8_w8a16,
+        use_int4_w4a16=use_int4_w4a16,
+        per_channel_quant=per_channel_quant,
+        w1_scale=w1_scale,
+        w2_scale=w2_scale,
+        w1_zp=w1_zp,
+        w2_zp=w2_zp,
+        a1_scale=a1_scale,
+        a2_scale=a2_scale,
+        block_shape=block_shape,
+        routed_scaling_factor=routed_scaling_factor,
+        gemm1_alpha=gemm1_alpha,
+        gemm1_limit=gemm1_limit,
+        filter_expert=filter_expert,
+        swiglu_limit=swiglu_limit,
+        gate_up_interleaved=gate_up_interleaved,
+    )
+
+
+def _call_fused_experts_impl(
+    inplace: bool,
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    b1: Optional[torch.Tensor],
+    b2: Optional[torch.Tensor],
+    use_fp8_w8a8: bool,
+    use_int8_w8a8: bool,
+    use_int8_w8a16: bool,
+    use_int4_w4a16: bool,
+    per_channel_quant: bool,
+    w1_scale: Optional[torch.Tensor],
+    w2_scale: Optional[torch.Tensor],
+    w1_zp: Optional[torch.Tensor],
+    w2_zp: Optional[torch.Tensor],
+    a1_scale: Optional[torch.Tensor],
+    a2_scale: Optional[torch.Tensor],
+    block_shape: Optional[List[int]],
+    activation: str,
+    is_gated: bool,
+    apply_router_weight_on_input: bool,
+    routed_scaling_factor: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_limit: Optional[float],
+    filter_expert: bool,
+    swiglu_limit: Optional[float],
+    gate_up_interleaved: bool,
+) -> torch.Tensor | None:
+    """Dispatch to custom op based on inplace flag for torch.compile."""
+    if torch.compiler.is_compiling():
+        if inplace:
+            return torch.ops.sglang.fused_experts_impl_inplace(
+                hidden_states, w1, w2, topk_weights, topk_ids,
+                b1, b2, use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16,
+                per_channel_quant, w1_scale, w2_scale, w1_zp, w2_zp, a1_scale, a2_scale,
+                block_shape, activation, is_gated, apply_router_weight_on_input,
+                routed_scaling_factor, gemm1_alpha, gemm1_limit, filter_expert,
+                swiglu_limit, gate_up_interleaved,
+            )
+        else:
+            return torch.ops.sglang.fused_experts_impl_outplace(
+                hidden_states, w1, w2, topk_weights, topk_ids,
+                b1, b2, use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16,
+                per_channel_quant, w1_scale, w2_scale, w1_zp, w2_zp, a1_scale, a2_scale,
+                block_shape, activation, is_gated, apply_router_weight_on_input,
+                routed_scaling_factor, gemm1_alpha, gemm1_limit, filter_expert,
+                swiglu_limit, gate_up_interleaved,
+            )
+    else:
+        if inplace:
+            return fused_experts_impl_inplace(
+                hidden_states, w1, w2, topk_weights, topk_ids,
+                b1, b2, use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16,
+                per_channel_quant, w1_scale, w2_scale, w1_zp, w2_zp, a1_scale, a2_scale,
+                block_shape, activation, is_gated, apply_router_weight_on_input,
+                routed_scaling_factor, gemm1_alpha, gemm1_limit, filter_expert,
+                swiglu_limit, gate_up_interleaved,
+            )
+        else:
+            return fused_experts_impl_outplace(
+                hidden_states, w1, w2, topk_weights, topk_ids,
+                b1, b2, use_fp8_w8a8, use_int8_w8a8, use_int8_w8a16, use_int4_w4a16,
+                per_channel_quant, w1_scale, w2_scale, w1_zp, w2_zp, a1_scale, a2_scale,
+                block_shape, activation, is_gated, apply_router_weight_on_input,
+                routed_scaling_factor, gemm1_alpha, gemm1_limit, filter_expert,
+                swiglu_limit, gate_up_interleaved,
+            )
+# -----------------------------------------------------------------------------
+
+
+# Note: The outer registration is kept for API compatibility,
+# but the actual implementation is now wrapped in a custom op that
+# properly handles dynamic autotuning for all quantization formats (FP8 included).
 def inplace_fused_experts(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -129,7 +422,8 @@ def inplace_fused_experts(
     swiglu_limit: Optional[float] = None,
     gate_up_interleaved: bool = True,
 ) -> None:
-    fused_experts_impl(
+    _call_fused_experts_impl(
+        True,
         hidden_states,
         w1,
         w2,
@@ -137,10 +431,6 @@ def inplace_fused_experts(
         topk_ids,
         b1,
         b2,
-        True,
-        activation,
-        is_gated,
-        apply_router_weight_on_input,
         use_fp8_w8a8,
         use_int8_w8a8,
         use_int8_w8a16,
@@ -153,17 +443,21 @@ def inplace_fused_experts(
         a1_scale,
         a2_scale,
         block_shape,
-        False,
+        activation,
+        is_gated,
+        apply_router_weight_on_input,
         routed_scaling_factor,
         gemm1_alpha,
         gemm1_limit,
         filter_expert,
-        swiglu_limit=swiglu_limit,
-        gate_up_interleaved=gate_up_interleaved,
+        swiglu_limit,
+        gate_up_interleaved,
     )
 
 
-@register_custom_op(out_shape="hidden_states")
+# Note: The outer registration is kept for API compatibility,
+# but the actual implementation is now wrapped in a custom op that
+# properly handles dynamic autotuning for all quantization formats (FP8 included).
 def outplace_fused_experts(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
@@ -195,7 +489,12 @@ def outplace_fused_experts(
     swiglu_limit: Optional[float] = None,
     gate_up_interleaved: bool = True,
 ) -> torch.Tensor:
-    return fused_experts_impl(
+    out = hidden_states.new_empty(
+        (hidden_states.shape[0], w2.shape[1]),
+        dtype=hidden_states.dtype,
+    )
+    result = _call_fused_experts_impl(
+        False,
         hidden_states,
         w1,
         w2,
@@ -203,10 +502,6 @@ def outplace_fused_experts(
         topk_ids,
         b1,
         b2,
-        False,
-        activation,
-        is_gated,
-        apply_router_weight_on_input,
         use_fp8_w8a8,
         use_int8_w8a8,
         use_int8_w8a16,
@@ -219,14 +514,17 @@ def outplace_fused_experts(
         a1_scale,
         a2_scale,
         block_shape,
-        no_combine=no_combine,
-        routed_scaling_factor=routed_scaling_factor,
-        gemm1_alpha=gemm1_alpha,
-        gemm1_limit=gemm1_limit,
-        filter_expert=filter_expert,
-        swiglu_limit=swiglu_limit,
-        gate_up_interleaved=gate_up_interleaved,
+        activation,
+        is_gated,
+        apply_router_weight_on_input,
+        routed_scaling_factor,
+        gemm1_alpha,
+        gemm1_limit,
+        filter_expert,
+        swiglu_limit,
+        gate_up_interleaved,
     )
+    return result if result is not None else out
 
 
 def fused_experts(

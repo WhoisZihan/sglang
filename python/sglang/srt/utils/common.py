@@ -2566,19 +2566,27 @@ def direct_register_custom_op(
 
         schema_str = torch._custom_op.impl.infer_schema(op_func, mutates_args)
 
-    try:
-        my_lib.define(op_name + schema_str)
-        if is_npu():
-            # https://github.com/sgl-project/sglang/pull/12287/files#r2499583982
-            my_lib.impl(op_name, op_func, "PrivateUse1")
-        elif is_xpu():
-            my_lib.impl(op_name, op_func, "XPU")
-        elif is_musa():
-            my_lib.impl(op_name, op_func, "MUSA")
-        else:
-            my_lib.impl(op_name, op_func, "CUDA")
-        if fake_impl is not None:
-            my_lib._register_fake(op_name, fake_impl)
+     try:
+         my_lib.define(op_name + schema_str)
+         if is_npu():
+             # https://github.com/sgl-project/sglang/pull/12287/files#r2499583982
+             my_lib.impl(op_name, op_func, "PrivateUse1")
+             # Also register Python fallback for CPU
+             my_lib.impl(op_name, op_func, "Python")
+         elif is_xpu():
+             my_lib.impl(op_name, op_func, "XPU")
+             # Also register Python fallback for CPU
+             my_lib.impl(op_name, op_func, "Python")
+         elif is_musa():
+             my_lib.impl(op_name, op_func, "MUSA")
+             # Also register Python fallback for CPU
+             my_lib.impl(op_name, op_func, "Python")
+         else:
+             my_lib.impl(op_name, op_func, "CUDA")
+             # Also register Python fallback for CPU
+             my_lib.impl(op_name, op_func, "Python")
+         if fake_impl is not None:
+             my_lib._register_fake(op_name, fake_impl)
     except RuntimeError as error:
         if "Tried to register an operator" in str(error) and "multiple times" in str(
             error
