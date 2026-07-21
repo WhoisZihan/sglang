@@ -272,6 +272,50 @@ class TestFusedMOE(CustomTestCase):
                     )
                     empty_gpu_cache()
 
+    def test_fused_moe_torch_compile(self):
+        # Test that fused_moe with custom_op registration works correctly under torch.compile
+        # This tests that the custom op wrapping avoids dynamo tracing issues and re-compilation
+        set_global_server_args_for_scheduler(ServerArgs(model_path="dummy"))
+        from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import (
+            outplace_fused_experts,
+            inplace_fused_experts,
+        )
+
+        # Test basic case that should work with torch.compile
+        m, k, n, e, topk = 32, 512, 256, 8, 2
+        dtype = torch.bfloat16
+
+        # Create inputs
+        a = self.create_random_gpu_tensor((m, k), dtype)
+        w1 = self.create_random_gpu_tensor((e, 2 * n, k), dtype)
+        w2 = self.create_random_gpu_tensor((e, k, n), dtype)
+        score = self.create_random_gpu_tensor((m, e), dtype)
+        topk_output = select_experts(
+            hidden_states=a,
+            router_logits=score,
+            topk_config=TopKConfig(topk=topk, renormalize=False),
+        )
+        topk_weights, topk_ids, _ = topk_output
+
+        # Test outplace version compiled
+        compiled_outplace = torch.compile(outplace_fused_experts, fullgraph=True)
+        result = compiled_outplace(a, w1, w2, topk_weights, topk_ids)
+        assert result.shape == (m, n), f"Expected shape {(m, n)}, got {result.shape}"
+
+        # Test inplace version compiled
+        out = self.create_random_gpu_tensor((m, n), dtype)
+        compiled_inplace = torch.compile(inplace_fused_experts, fullgraph=True)
+        result_inplace = compiled_inplace(out, w1, w2, topk_weights, topk_ids)
+        assert result_inplace is None
+        assert out.shape == (m, n), f"Expected shape {(m, n)}, got {out.shape}"
+
+        # Test against naive reference implementation for correctness
+        rtol, atol = self.get_tolerance(dtype)
+        reference = self.torch_naive_moe(a, w1, w2, score, topk)
+        torch.testing.assert_close(result, reference, rtol=rtol, atol=atol)
+        torch.testing.assert_close(out, reference, rtol=rtol, atol=atol)
+        empty_gpu_cache()
+
 
 if __name__ == "__main__":
     unittest.main()
