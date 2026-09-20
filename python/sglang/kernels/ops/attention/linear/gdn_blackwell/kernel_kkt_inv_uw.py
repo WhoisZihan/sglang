@@ -415,7 +415,14 @@ class Sm100ChunkUWKernel:
                     # strict lower mask
                     # NOTE: for OOB t position, s_beta is filled with zeros.
                     # hence, we don't need to apply bounds check for columns.
-                    A_masked = cute.where(row_indices > col_indices + i * 16, A, 0.0)
+                    # ``i <= warp_id_`` is a compile-time tile predicate.  It
+                    # zeroes complete upper tiles while retaining the fixed
+                    # SMEM layout required by the inverse ldmatrix loads.
+                    tile_live = i <= warp_id_
+                    lower_mask = cute.where(
+                        tile_live, row_indices > col_indices + i * 16, False
+                    )
+                    A_masked = cute.where(lower_mask, A, 0.0)
 
                     # pack to BF16
                     # CuteDSL doesn't generate cvt.bf16x2.f32 here for some reasons
