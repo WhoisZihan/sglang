@@ -380,14 +380,7 @@ class Sm100KdaChunkUWKernel:
                     # KDA: decay is already inside KKT; only beta + mask here.
                     A = kkt[None, None, None, i] * beta_row
 
-                    # KDA KKT is not symmetric, but its inverse input is still
-                    # strict-lower.  Predicate complete upper tiles while
-                    # preserving the fixed SMEM tile layout.
-                    tile_live = i <= warp_id_
-                    lower_mask = cute.where(
-                        tile_live, row_indices > col_indices + i * 16, False
-                    )
-                    A_masked = cute.where(lower_mask, A, 0.0)
+                    A_masked = cute.where(row_indices > col_indices + i * 16, A, 0.0)
 
                     packed = cute.make_rmem_tensor(4, Uint32)
                     packed[0] = cvt.fp32x2_to_bf16x2(
