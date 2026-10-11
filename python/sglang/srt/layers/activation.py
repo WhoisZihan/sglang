@@ -67,9 +67,7 @@ if _is_cuda:
     from sglang.kernels.ops.activation.activation import (
         gelu_tanh_and_mul as _jit_gelu_tanh_and_mul,
     )
-    from sglang.kernels.ops.activation.activation import (
-        relu2,
-    )
+    from sglang.kernels.ops.activation.activation import relu2
     from sglang.kernels.ops.activation.activation import (
         silu_and_mul as _jit_silu_and_mul,
     )
@@ -273,7 +271,11 @@ class NewGELU(BaseFusedOp):
         return 0.5 * x * (1.0 + torch.tanh(c * (x + 0.044715 * torch.pow(x, 3.0))))
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: Implement the CUDA kernel for NewGELU in sgl-kernel
+        from sglang.kernels.ops.activation.gelu import new_gelu
+
+        return new_gelu(x)
+
+    def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
         return self.forward_native(x)
 
 
@@ -296,7 +298,9 @@ class QuickGELU(BaseFusedOp):
         return x * torch.sigmoid(1.702 * x)
 
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
-        return self.forward_native(x)
+        from sglang.kernels.ops.activation.gelu import quick_gelu
+
+        return quick_gelu(x)
 
     def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
         out = torch.empty(x.shape, dtype=x.dtype, device=x.device)
