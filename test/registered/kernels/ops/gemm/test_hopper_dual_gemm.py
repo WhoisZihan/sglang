@@ -5,7 +5,11 @@ import unittest
 import torch
 
 from sglang.kernels.ops.gemm import hopper_dual_gemm_swiglu
-from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import HOPPER_DUAL_GEMM_TACTICS
+from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import (
+    _COMPILED,
+    HOPPER_DUAL_GEMM_TACTICS,
+    _pick_hopper_tactic,
+)
 from sglang.kernels.selector import clear_cache
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.test_utils import CustomTestCase
@@ -104,8 +108,42 @@ class TestHopperDualGemm(CustomTestCase):
             with self.assertRaisesRegex(ValueError, "tactic"):
                 hopper_dual_gemm_swiglu(x[:1], w, tactic)
 
+    def test_auto_dispatch_preserves_unmeasured_regimes(self):
+        # The measured winning configuration must not leak into unmeasured
+        # reductions, widths, dtypes or GPU topologies.
+        for m in (1, 2, 4, 8, 9, 16):
+            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 2)
+        for m, k, n, sms, dtype in (
+            (0, 4096, 3584, 114, torch.bfloat16),
+            (8, 4096, 14336, 114, torch.bfloat16),
+            (8, 4096, 3584, 114, torch.float16),
+            (8, 2048, 3584, 114, torch.bfloat16),
+            (8, 4096, 4096, 114, torch.bfloat16),
+            (8, 4096, 3584, 132, torch.bfloat16),
+        ):
+            with self.subTest(m=m, k=k, n=n, sms=sms, dtype=dtype):
+                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 0)
+
+    def test_auto_dispatch_reuses_explicit_specialization(self):
+        # Auto and explicit selection must use the same device specialization;
+        # test both token tiles and numerical output at the measured K/I.
+        device = torch.device("cuda", torch.cuda.current_device())
+        sms = torch.cuda.get_device_properties(device).multi_processor_count
+        for m in (1, 9):
+            x, w = self._inputs(m, 3584, 4096, torch.bfloat16)
+            chosen = _pick_hopper_tactic(m, 4096, 3584, sms, x.dtype)
+            for tactic in range(len(HOPPER_DUAL_GEMM_TACTICS)):
+                _COMPILED.pop((device, x.dtype, m, 3584, 4096, tactic), None)
+            self._check(x, w)
+            key = (device, x.dtype, m, 3584, 4096, chosen)
+            specialization = _COMPILED[key]
+            explicit = hopper_dual_gemm_swiglu(x, w, chosen)
+            self._check(x, w, explicit)
+            self.assertIs(_COMPILED[key], specialization)
+            self.assertNotIn((device, x.dtype, m, 3584, 4096, -1), _COMPILED)
+
     def test_torch_compile_uses_custom_op_fake_contract(self):
-        x, w = self._inputs(8, 128, 128, torch.bfloat16)
+        x, w = self._inputs(8, 3584, 4096, torch.bfloat16)
         # Warm the device specialization before tracing/capture.
         self._check(x, w)
         # Force lazy backend resolution during tracing, even if previous
