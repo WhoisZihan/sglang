@@ -10,7 +10,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <utility>
 
 namespace sglang {
 
@@ -53,14 +52,14 @@ void launch_gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
   using namespace host;
   auto N = SymbolicSize{"num_elements"};
   auto device_ = SymbolicDevice{};
-  // Keep the receiver's type explicit for every call. NVCC can misparse
-  // chained template calls, particularly inside generic lambdas.
-  TensorMatcher matcher({N});
-  std::move(matcher).template with_dtype<T>();
-  std::move(matcher).template with_device<kDLCUDA>(device_);
-  std::move(matcher).ensure_alignment(kWidth * sizeof(T));
-  std::move(matcher).verify(input);
-  std::move(matcher).verify(out);
+  // TensorMatcher stores a span into the temporary shape list. Keep every
+  // verification in this full expression so that the list stays alive.
+  TensorMatcher({N})
+      .template with_dtype<T>()
+      .template with_device<kDLCUDA>(device_)
+      .ensure_alignment(kWidth * sizeof(T))
+      .verify(input)
+      .verify(out);
   const auto n = N.unwrap();
   CHECK_HOST(n <= std::numeric_limits<uint32_t>::max()) << "too many GELU elements for 32-bit indexing";
   if (n == 0) return;
