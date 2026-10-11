@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace sglang {
 
@@ -46,40 +47,44 @@ __global__ void gelu_kernel(T* __restrict__ out, const T* __restrict__ input, ui
   device::PDLTriggerSecondary<kUsePDL>();
 }
 
-/// \brief Validate contiguous flat CUDA tensors and launch standalone GELU.
-template <typename T, bool kQuick, bool kUsePDL>
-void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
+/// \brief Validate and launch GELU at a fixed vector width.
+template <typename T, bool kQuick, bool kUsePDL, uint32_t kWidth>
+void launch_gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
   using namespace host;
   auto N = SymbolicSize{"num_elements"};
-  auto device = SymbolicDevice{};
-  TensorMatcher({N}).template with_dtype<T>().template with_device<kDLCUDA>(device).verify(input).verify(out);
+  auto device_ = SymbolicDevice{};
+  // Keep the receiver's type explicit for every call. NVCC can misparse
+  // chained template calls, particularly inside generic lambdas.
+  TensorMatcher matcher({N});
+  std::move(matcher).template with_dtype<T>();
+  std::move(matcher).template with_device<kDLCUDA>(device_);
+  std::move(matcher).ensure_alignment(kWidth * sizeof(T));
+  std::move(matcher).verify(input);
+  std::move(matcher).verify(out);
   const auto n = N.unwrap();
   CHECK_HOST(n <= std::numeric_limits<uint32_t>::max()) << "too many GELU elements for 32-bit indexing";
   if (n == 0) return;
 
-  constexpr uint32_t kVecSize = device::kMaxVecBytes / sizeof(T);
   constexpr uint32_t kBlockSize = 256;
+  const auto blocks = div_ceil(div_ceil(n, static_cast<int64_t>(kWidth)), static_cast<int64_t>(kBlockSize));
+  LaunchKernel(blocks, kBlockSize, device_.unwrap())
+      .enable_pdl(kUsePDL)(
+          gelu_kernel<T, kQuick, kUsePDL, kWidth>,
+          static_cast<T*>(out.data_ptr()),
+          static_cast<const T*>(input.data_ptr()),
+          static_cast<uint32_t>(n));
+}
+
+/// \brief Select vectorized or scalar GELU based on both tensor pointers.
+template <typename T, bool kQuick, bool kUsePDL>
+void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
+  constexpr uint32_t kVecSize = device::kMaxVecBytes / sizeof(T);
   const auto aligned = (reinterpret_cast<uintptr_t>(input.data_ptr()) % device::kMaxVecBytes == 0) &&
                        (reinterpret_cast<uintptr_t>(out.data_ptr()) % device::kMaxVecBytes == 0);
-  const auto launch = [&]<uint32_t kWidth>() {
-    TensorMatcher({N})
-        .template with_dtype<T>()
-        .template with_device<kDLCUDA>(device)
-        .ensure_alignment(kWidth * sizeof(T))
-        .verify(input)
-        .verify(out);
-    const auto blocks = div_ceil(div_ceil(n, static_cast<int64_t>(kWidth)), static_cast<int64_t>(kBlockSize));
-    LaunchKernel(blocks, kBlockSize, device.unwrap())
-        .enable_pdl(kUsePDL)(
-            gelu_kernel<T, kQuick, kUsePDL, kWidth>,
-            static_cast<T*>(out.data_ptr()),
-            static_cast<const T*>(input.data_ptr()),
-            static_cast<uint32_t>(n));
-  };
   if (aligned) {
-    launch.template operator()<kVecSize>();
+    launch_gelu<T, kQuick, kUsePDL, kVecSize>(input, out);
   } else {
-    launch.template operator()<1>();
+    launch_gelu<T, kQuick, kUsePDL, 1>(input, out);
   }
 }
 
