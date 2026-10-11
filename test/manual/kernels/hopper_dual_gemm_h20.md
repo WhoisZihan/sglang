@@ -94,7 +94,19 @@ singleton rows from disappearing from the tensor map; K remains static.
 Rerun `compile`, `unit`, and `debug` after this fix. The original reports also
 contained 41 cuGetProcAddress_v2 API errors in every case, including the two
 numerically successful cases; these are distinct from the kernel error 715.
-The fix still needs GPU validation.
+These first reports preceded the singleton-row fix.
+
+The subsequent H100 PCIe unit run passed the numerical/padding/pipeline,
+CUDA Graph replay, storage, and tactic contract tests. The fullgraph test
+failed while Dynamo traced the selector's lazy import, before entering the
+kernel. The Hopper public entry now resolves its fixed backend through an
+`assume_constant_result` helper, leaving the registered torch custom op in
+the graph. The fullgraph regression clears the selector cache before tracing.
+An isolated CPU check on PyTorch 2.14.1 reproduced the old lazy-import failure
+and passed fullgraph AOT/fake execution with both cold and warm selector caches
+after the fix, using a substitute custom op rather than the CUDA kernel.
+This integration fix needs a repeat of the GPU unit suite; performance and
+clean sanitizer results remain pending.
 
 ## Measure all tactics
 

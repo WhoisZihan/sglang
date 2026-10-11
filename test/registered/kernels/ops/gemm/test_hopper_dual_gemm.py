@@ -6,6 +6,7 @@ import torch
 
 from sglang.kernels.ops.gemm import hopper_dual_gemm_swiglu
 from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import HOPPER_DUAL_GEMM_TACTICS
+from sglang.kernels.selector import clear_cache
 from sglang.test.ci.ci_register import register_cuda_ci
 from sglang.test.test_utils import CustomTestCase
 
@@ -107,6 +108,9 @@ class TestHopperDualGemm(CustomTestCase):
         x, w = self._inputs(8, 128, 128, torch.bfloat16)
         # Warm the device specialization before tracing/capture.
         self._check(x, w)
+        # Force lazy backend resolution during tracing, even if previous
+        # numerical tests populated the selector cache.
+        clear_cache()
         compiled = torch.compile(hopper_dual_gemm_swiglu, fullgraph=True)
         self._check(x, w, compiled(x, w))
 

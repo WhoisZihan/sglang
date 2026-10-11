@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from torch.compiler import assume_constant_result
+
 from sglang.kernels.fused_op import BaseFusedOp, register_fused_op
 from sglang.kernels.registry import register_kernel
 from sglang.kernels.selector import get_kernel
@@ -351,13 +353,21 @@ def dual_gemm_swiglu(
     )
 
 
+@assume_constant_result
+def _ensure_hopper_dual_gemm_registered():
+    # The backend is fixed and cached per process. Resolve its lazy import
+    # outside Dynamo tracing; only the registered torch custom op enters FX.
+    get_kernel("gemm.hopper_dual_gemm_swiglu", KernelBackend.CUTE_DSL)
+
+
 def hopper_dual_gemm_swiglu(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ):
     """SM90 TMA/WGMMA decode dual GEMM with a fused SwiGLU epilogue."""
-    return get_kernel("gemm.hopper_dual_gemm_swiglu", KernelBackend.CUTE_DSL)(
-        x, gate_up_weight, tactic
-    )
+    import torch
+
+    _ensure_hopper_dual_gemm_registered()
+    return torch.ops.sglang.cutedsl_hopper_dual_gemm_swiglu(x, gate_up_weight, tactic)
 
 
 def bmm_fp8(
