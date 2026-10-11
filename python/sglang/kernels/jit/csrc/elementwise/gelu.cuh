@@ -74,13 +74,16 @@ void launch_gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
           static_cast<uint32_t>(n));
 }
 
-/// \brief Select vectorized or scalar GELU based on both tensor pointers.
-template <typename T, bool kQuick, bool kUsePDL>
+/// \brief Select scalar GELU for small inputs or unaligned pointers.
+template <typename T, bool kQuick, bool kUsePDL, bool kScalarSmall = true>
 void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
   constexpr uint32_t kVecSize = device::kMaxVecBytes / sizeof(T);
   const auto aligned = (reinterpret_cast<uintptr_t>(input.data_ptr()) % device::kMaxVecBytes == 0) &&
                        (reinterpret_cast<uintptr_t>(out.data_ptr()) % device::kMaxVecBytes == 0);
-  if (aligned) {
+  // A single CTA can give every small-input element its own thread. Vectorizing
+  // here serializes 4/8 activations per lane and makes a partial vector diverge
+  // from the full-vector lanes in the same warp.
+  if (aligned && (!kScalarSmall || input.numel() > 256)) {
     launch_gelu<T, kQuick, kUsePDL, kVecSize>(input, out);
   } else {
     launch_gelu<T, kQuick, kUsePDL, 1>(input, out);

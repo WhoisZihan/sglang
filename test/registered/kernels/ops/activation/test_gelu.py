@@ -33,7 +33,31 @@ def assert_result(fn, x, result):
 @pytest.mark.parametrize("fn", OPS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize(
-    "shape", [(), (0,), (2, 0), (1,), (127,), (128,), (4097,), (2, 3, 513)]
+    "shape",
+    [
+        (),
+        (0,),
+        (2, 0),
+        (1,),
+        (7,),
+        (8,),
+        (9,),
+        (31,),
+        (32,),
+        (33,),
+        (64,),
+        (127,),
+        (128,),
+        (129,),
+        (255,),
+        (256,),
+        (257,),
+        (511,),
+        (512,),
+        (513,),
+        (4097,),
+        (2, 3, 513),
+    ],
 )
 def test_gelu_shapes_and_tail(fn, dtype, shape):
     # Odd lengths exercise scalar tails; zero dimensions must avoid a zero-grid launch.
@@ -44,15 +68,16 @@ def test_gelu_shapes_and_tail(fn, dtype, shape):
 @pytest.mark.parametrize("fn", OPS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("offset", [0, 1])
-def test_gelu_out_alignment(fn, dtype, offset):
+@pytest.mark.parametrize("size", [127, 257, 513])
+def test_gelu_out_alignment(fn, dtype, offset, size):
     # Contiguous slices can still have pointers misaligned for vector loads/stores.
-    x = torch.randn(130, dtype=dtype, device="cuda")[offset : offset + 127]
-    backing = torch.full((130,), float("nan"), dtype=dtype, device="cuda")
-    out = backing[offset : offset + 127]
+    x = torch.randn(size + 3, dtype=dtype, device="cuda")[offset : offset + size]
+    backing = torch.full((size + 3,), float("nan"), dtype=dtype, device="cuda")
+    out = backing[offset : offset + size]
     assert fn(x, out) is out
     assert_result(fn, x, out)
     assert torch.isnan(backing[:offset]).all()
-    assert torch.isnan(backing[offset + 127 :]).all()
+    assert torch.isnan(backing[offset + size :]).all()
 
 
 @pytest.mark.parametrize("fn", OPS)
