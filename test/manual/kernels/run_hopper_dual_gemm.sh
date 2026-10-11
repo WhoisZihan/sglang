@@ -94,10 +94,37 @@ print("All twelve tactic/dtype/token-tile specializations compiled and launched.
 PY
 }
 
+find_sanitizer() {
+    local candidate
+    if command -v compute-sanitizer >/dev/null 2>&1; then
+        command -v compute-sanitizer
+        return 0
+    fi
+    for candidate in "${CUDA_HOME:-/usr/local/cuda}/bin/compute-sanitizer" \
+        "${CUDA_PATH:-/usr/local/cuda}/bin/compute-sanitizer" \
+        /usr/local/cuda/compute-sanitizer/compute-sanitizer; do
+        if [[ -x "$candidate" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 debug() {
-    command -v compute-sanitizer >/dev/null
     local variant case_dir failed=0
-    local -a flags
+    local sanitizer_path
+    local -a flags launcher
+    launcher=()
+    if sanitizer_path="$(find_sanitizer)"; then
+        echo "Using compute-sanitizer: $sanitizer_path"
+        launcher=("$sanitizer_path" --tool memcheck --error-exitcode 1)
+        echo "$sanitizer_path" > "$out/debug-mode.txt"
+    else
+        echo "compute-sanitizer not found; running four direct diagnostic launches."
+        echo "These runs do not perform sanitizer checks; install the CUDA compute-sanitizer tool for instruction localization."
+        echo "direct launches; no sanitizer checks" > "$out/debug-mode.txt"
+    fi
     for variant in original static-registers aligned aligned-static-registers; do
         flags=()
         case "$variant" in
@@ -111,7 +138,7 @@ debug() {
         if run_logged "debug-$variant" env \
             CUDA_LAUNCH_BLOCKING=1 CUTE_DSL_DISABLE_FILE_CACHING=True \
             CUTE_DSL_DUMP_DIR="$case_dir" \
-            compute-sanitizer --tool memcheck --error-exitcode 1 \
+            ${launcher[@]+"${launcher[@]}"} \
             "$py" test/manual/kernels/debug_hopper_dual_gemm.py ${flags[@]+"${flags[@]}"}; then
             echo PASS > "$case_dir/status.txt"
         else
@@ -144,10 +171,14 @@ bench() {
 }
 
 sanitizer() {
-    command -v compute-sanitizer >/dev/null
+    local sanitizer_path
+    if ! sanitizer_path="$(find_sanitizer)"; then
+        echo "ERROR: compute-sanitizer not found in PATH or the CUDA Toolkit; sanitizer checks did not run." >&2
+        return 1
+    fi
     local tool
     for tool in memcheck racecheck synccheck; do
-        run_logged "$tool" compute-sanitizer --tool "$tool" --error-exitcode 1 \
+        run_logged "$tool" "$sanitizer_path" --tool "$tool" --error-exitcode 1 \
             "$py" test/registered/kernels/ops/gemm/test_hopper_dual_gemm.py -v
     done
 }

@@ -74,6 +74,12 @@ redistribution. TMA, WGMMA, warp specialization and the pipeline remain active
 in all cases. These are diagnostic variants, not performance measurements.
 The public operator still uses its original register policy.
 
+The runner searches PATH and the CUDA Toolkit for compute-sanitizer. If the
+tool is unavailable, it prints a notice and still runs all four cases directly
+with blocking launches. Those direct runs are not sanitizer checks. The selected
+mode is recorded in `debug-mode.txt`; the explicit `sanitizer` stage requires
+the tool and fails with an explanatory error if it cannot be found.
+
 Failed cases do not prevent the remaining cases from running; the stage exits
 nonzero if any case fails. Send `environment.log`, `debug-*.log`, and the four
 `debug-*` artifact directories. A passing static-register case helps isolate
