@@ -51,6 +51,9 @@ class TestHopperDualGemm(CustomTestCase):
             for tactic in range(len(HOPPER_DUAL_GEMM_TACTICS)):
                 for m, n, k in (
                     (1, 1, 64),  # single stage, padded K for K=128 tactics
+                    (1, 64, 128),  # singleton X row must retain a 2D TMA map
+                    (1, 65, 128),  # reproduces the reported TMA illegal instruction
+                    (8, 1, 128),  # singleton weight rows must also retain 2D maps
                     (8, 64, 128),
                     (9, 65, 192),  # token, feature and reduction tails
                     (16, 127, 384),  # stages fill; feature tail

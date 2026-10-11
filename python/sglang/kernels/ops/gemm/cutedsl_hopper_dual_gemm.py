@@ -311,6 +311,16 @@ def _validate(x, weight):
         raise ValueError("weight must contain equal nonempty gate/up rows")
 
 
+def _tma_tensor(tensor: torch.Tensor):
+    # A static singleton row is canonicalized to stride zero and removed from
+    # the TMA map. Keep the row extent dynamic so M=1 (or I=1 for weights)
+    # still uses a 2D tile with hardware zero-fill for the remaining rows.
+    # K stays static, preserving the reduction-loop specialization.
+    return from_dlpack(tensor.detach(), assumed_align=16).mark_compact_shape_dynamic(
+        mode=0, stride_order=(0, 1)
+    )
+
+
 def _run(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ) -> torch.Tensor:
@@ -328,10 +338,11 @@ def _run(
         return out
     with torch.cuda.device(x.device):
         stream = cuda.CUstream(torch.cuda.current_stream(x.device).cuda_stream)
-        arguments = tuple(
-            from_dlpack(t.detach(), assumed_align=16)
-            for t in (x, *gate_up_weight.chunk(2, dim=0), out)
-        ) + (stream,)
+        arguments = (
+            *(_tma_tensor(t) for t in (x, *gate_up_weight.chunk(2, dim=0))),
+            from_dlpack(out.detach(), assumed_align=16),
+            stream,
+        )
         key = (x.device, x.dtype, m, n, k, tactic)
         compiled = _COMPILED.get(key)
         if compiled is None:

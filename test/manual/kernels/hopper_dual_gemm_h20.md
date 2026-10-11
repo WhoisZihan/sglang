@@ -86,6 +86,16 @@ nonzero if any case fails. Send `environment.log`, `debug-*.log`, and the four
 the fault but does not establish the exact failing instruction without the
 sanitizer report and generated code. No GPU validation is available locally.
 
+The first H100 PCIe report reproduced error 715 for M=1, I=65 with both
+register policies. Both M=8, I=64 variants completed their numerical comparison.
+The failing PTX used a 1D TMA X load at the reported source line; the aligned
+variants used 2D loads. TMA inputs now keep their row extent dynamic to prevent
+singleton rows from disappearing from the tensor map; K remains static.
+Rerun `compile`, `unit`, and `debug` after this fix. The original reports also
+contained 41 cuGetProcAddress_v2 API errors in every case, including the two
+numerically successful cases; these are distinct from the kernel error 715.
+The fix still needs GPU validation.
+
 ## Measure all tactics
 
 ```bash

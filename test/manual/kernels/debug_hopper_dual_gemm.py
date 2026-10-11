@@ -12,6 +12,7 @@ from cutlass.cute.runtime import from_dlpack
 
 from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import (
     HopperDualGemmKernel,
+    _tma_tensor,
     _validate,
 )
 
@@ -51,10 +52,11 @@ def main():
         ),
         flush=True,
     )
-    arguments = tuple(
-        from_dlpack(t.detach(), assumed_align=16)
-        for t in (x, *weight.chunk(2, dim=0), out)
-    ) + (cuda.CUstream(torch.cuda.current_stream().cuda_stream),)
+    arguments = (
+        *(_tma_tensor(t) for t in (x, *weight.chunk(2, dim=0))),
+        from_dlpack(out.detach(), assumed_align=16),
+        cuda.CUstream(torch.cuda.current_stream().cuda_stream),
+    )
     compiled = cute.compile(
         HopperDualGemmKernel(m, 0, redistribute_registers=not args.static_registers),
         *arguments,
