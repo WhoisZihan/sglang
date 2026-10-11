@@ -52,7 +52,7 @@ void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
   using namespace host;
   auto N = SymbolicSize{"num_elements"};
   auto device = SymbolicDevice{};
-  TensorMatcher({N}).with_dtype<T>().with_device<kDLCUDA>(device).verify(input).verify(out);
+  TensorMatcher({N}).template with_dtype<T>().template with_device<kDLCUDA>(device).verify(input).verify(out);
   const auto n = N.unwrap();
   CHECK_HOST(n <= std::numeric_limits<uint32_t>::max()) << "too many GELU elements for 32-bit indexing";
   if (n == 0) return;
