@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage: bash test/manual/kernels/run_hopper_dual_gemm.sh STAGE [OUTPUT_DIR]
-Stages: check, compile, unit, bench, sanitizer, all
+Stages: check, compile, debug, unit, bench, sanitizer, all
 all = check + compile + unit + bench; sanitizer is explicitly requested.
 Environment: CUDA_VISIBLE_DEVICES (default 0), PYTHON (default python),
 BENCH_RUNS (default 1), BENCH_DTYPES (default bf16), REPETITIONS (default 50).
@@ -16,7 +16,7 @@ EOF
 stage="${1:-all}"
 case "$stage" in
     -h|--help) usage; exit 0 ;;
-    check|compile|unit|bench|sanitizer|all) ;;
+    check|compile|debug|unit|bench|sanitizer|all) ;;
     *) usage; exit 2 ;;
 esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -92,6 +92,34 @@ for dtype in (torch.bfloat16, torch.float16):
             assert torch.isfinite(y).all().item()
 print("All twelve tactic/dtype/token-tile specializations compiled and launched.", flush=True)
 PY
+}
+
+debug() {
+    command -v compute-sanitizer >/dev/null
+    local variant case_dir failed=0
+    local -a flags
+    for variant in original static-registers aligned aligned-static-registers; do
+        flags=()
+        case "$variant" in
+            static-registers) flags=(--static-registers) ;;
+            aligned) flags=(--aligned) ;;
+            aligned-static-registers) flags=(--aligned --static-registers) ;;
+        esac
+        case_dir="$out/debug-$variant"
+        mkdir -p "$case_dir"
+        # A poisoned CUDA context must never be reused by the next case.
+        if run_logged "debug-$variant" env \
+            CUDA_LAUNCH_BLOCKING=1 CUTE_DSL_DISABLE_FILE_CACHING=True \
+            CUTE_DSL_DUMP_DIR="$case_dir" \
+            compute-sanitizer --tool memcheck --error-exitcode 1 \
+            "$py" test/manual/kernels/debug_hopper_dual_gemm.py ${flags[@]+"${flags[@]}"}; then
+            echo PASS > "$case_dir/status.txt"
+        else
+            echo FAIL > "$case_dir/status.txt"
+            failed=1
+        fi
+    done
+    return "$failed"
 }
 
 unit() {

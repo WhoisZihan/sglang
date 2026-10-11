@@ -58,6 +58,28 @@ autograd, bias, LoRA, or quantization. Out-of-bounds TMA loads zero-fill padding
 output stores are predicated. Keep numerical failures as failures, and send
 `compile.log` immediately if compilation fails.
 
+## Diagnose a runtime illegal instruction
+
+If compilation finishes but the first launch reports CUDA error 715, run:
+
+```bash
+bash test/manual/kernels/run_hopper_dual_gemm.sh debug /tmp/h20-dualgemm-debug
+```
+
+This runs four separate processes under compute-sanitizer memcheck, retaining
+line information, PTX and CUBIN. The first reproduces BF16 M=1, I=65, K=128,
+tactic 0. The second removes dynamic register redistribution only. The last
+two use M=8, I=64 to remove feature/token padding, with and without register
+redistribution. TMA, WGMMA, warp specialization and the pipeline remain active
+in all cases. These are diagnostic variants, not performance measurements.
+The public operator still uses its original register policy.
+
+Failed cases do not prevent the remaining cases from running; the stage exits
+nonzero if any case fails. Send `environment.log`, `debug-*.log`, and the four
+`debug-*` artifact directories. A passing static-register case helps isolate
+the fault but does not establish the exact failing instruction without the
+sanitizer report and generated code. No GPU validation is available locally.
+
 ## Measure all tactics
 
 ```bash

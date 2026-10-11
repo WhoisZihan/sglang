@@ -35,9 +35,14 @@ _COMPILED = {}
 class HopperDualGemmKernel:
     """One TMA producer warpgroup and one WGMMA consumer warpgroup per CTA."""
 
-    def __init__(self, num_tokens: int, tactic: int):
+    def __init__(
+        self, num_tokens: int, tactic: int, *, redistribute_registers: bool = True
+    ):
         self.features, self.reduction, self.stages = HOPPER_DUAL_GEMM_TACTICS[tactic]
         self.tokens = 8 if num_tokens <= 8 else 16
+        # The manual crash reproducer can isolate setmaxnreg without changing
+        # the public operator's compilation policy or TMA/WGMMA pipeline.
+        self.redistribute_registers = redistribute_registers
 
     @cute.jit
     def __call__(
@@ -192,7 +197,8 @@ class HopperDualGemmKernel:
         pipeline_init_wait(cluster_shape_mn=(1, 1))
 
         if wg == 0:
-            cute.arch.warpgroup_reg_dealloc(40)
+            if cutlass.const_expr(self.redistribute_registers):
+                cute.arch.warpgroup_reg_dealloc(40)
             if warp == 0:
                 producer = pipeline.make_pipeline_state(
                     pipeline.PipelineUserType.Producer, self.stages
@@ -223,7 +229,8 @@ class HopperDualGemmKernel:
                     producer.advance()
                 mainloop.producer_tail(producer)
         else:
-            cute.arch.warpgroup_reg_alloc(128)
+            if cutlass.const_expr(self.redistribute_registers):
+                cute.arch.warpgroup_reg_alloc(128)
             # Descriptors are warpgroup-uniform; output coordinates are per lane.
             mma_wg = tiled_mma.get_slice(0)
             ag = tiled_mma.make_fragment_A(mma_wg.partition_A(sg))
