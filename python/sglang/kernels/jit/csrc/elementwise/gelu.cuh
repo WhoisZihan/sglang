@@ -63,8 +63,8 @@ void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
                        (reinterpret_cast<uintptr_t>(out.data_ptr()) % device::kMaxVecBytes == 0);
   const auto launch = [&]<uint32_t kWidth>() {
     TensorMatcher({N})
-        .with_dtype<T>()
-        .with_device<kDLCUDA>(device)
+        .template with_dtype<T>()
+        .template with_device<kDLCUDA>(device)
         .ensure_alignment(kWidth * sizeof(T))
         .verify(input)
         .verify(out);
