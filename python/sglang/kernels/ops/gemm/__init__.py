@@ -351,6 +351,15 @@ def dual_gemm_swiglu(
     )
 
 
+def hopper_dual_gemm_swiglu(
+    x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
+):
+    """SM90 TMA/WGMMA decode dual GEMM with a fused SwiGLU epilogue."""
+    return get_kernel("gemm.hopper_dual_gemm_swiglu", KernelBackend.CUTE_DSL)(
+        x, gate_up_weight, tactic
+    )
+
+
 def bmm_fp8(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -455,6 +464,7 @@ __all__ = [
     "dual_gemm_swiglu",
     "dual_gemm_swiglu_fp8",
     "fp8_scaled_mm",
+    "hopper_dual_gemm_swiglu",
     "kimi_k3_tiny_gemm",
     "n128k512_gemm_bf16",
     "n32k5120_gemm_bf16",
@@ -508,6 +518,17 @@ register_kernel(
         capabilities=frozenset(
             {CapabilityRequirement.cuda(min_sm=(9, 0), max_sm=(9, 0))}
         ),
+    )
+)
+
+
+register_kernel(
+    KernelSpec(
+        op="gemm.hopper_dual_gemm_swiglu",
+        backend=KernelBackend.CUTE_DSL,
+        target="sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm:hopper_dual_gemm_swiglu",
+        capabilities=_SM90,
+        description="FP16/BF16 TMA warp-specialized WGMMA dual GEMM + SwiGLU on Hopper.",
     )
 )
 register_kernel(
