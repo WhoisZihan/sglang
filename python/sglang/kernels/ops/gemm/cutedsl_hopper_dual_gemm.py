@@ -32,6 +32,29 @@ HOPPER_DUAL_GEMM_TACTICS = ((64, 128, 3), (128, 128, 3), (64, 64, 5))
 _COMPILED = {}
 
 
+def _pick_hopper_tactic(
+    num_tokens: int,
+    hidden_size: int,
+    intermediate_size: int,
+    multiprocessor_count: int,
+    input_dtype: torch.dtype,
+) -> int:
+    """Select an offline-measured tactic without tuning inside forward."""
+    # H100 PCIe (114 SMs), BF16, K=4096: tactic 2 beat tactic 0 for
+    # I=3584 at M=1/2/4/8/9/16 with both one and four rotating weight sets.
+    # I=14336 favored tactic 0. Keep the original default for unmeasured
+    # widths, reductions, dtypes and SM counts (including H20/H200).
+    if (
+        1 <= num_tokens <= MAX_HOPPER_DUAL_GEMM_TOKENS
+        and hidden_size == 4096
+        and intermediate_size == 3584
+        and multiprocessor_count == 114
+        and input_dtype == torch.bfloat16
+    ):
+        return 2
+    return 0
+
+
 class HopperDualGemmKernel:
     """One TMA producer warpgroup and one WGMMA consumer warpgroup per CTA."""
 
@@ -325,14 +348,18 @@ def _run(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ) -> torch.Tensor:
     _validate(x, gate_up_weight)
-    # The narrow CTA is a conservative starting policy. Tactic selection is
-    # explicit for measurement; no timed tuning or synchronization in forward.
-    if tactic == -1:
-        tactic = 0
-    if not 0 <= tactic < len(HOPPER_DUAL_GEMM_TACTICS):
-        raise ValueError("invalid Hopper DualGEMM tactic")
     m, k = x.shape
     n = gate_up_weight.shape[0] // 2
+    if tactic == -1:
+        tactic = _pick_hopper_tactic(
+            m,
+            k,
+            n,
+            torch.cuda.get_device_properties(x.device).multi_processor_count,
+            x.dtype,
+        )
+    if not 0 <= tactic < len(HOPPER_DUAL_GEMM_TACTICS):
+        raise ValueError("invalid Hopper DualGEMM tactic")
     out = torch.empty((m, n), device=x.device, dtype=x.dtype)
     if m == 0:
         return out
@@ -375,5 +402,5 @@ direct_register_custom_op(
 def hopper_dual_gemm_swiglu(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ) -> torch.Tensor:
-    """FP16/BF16 decode DualGEMM on SM90, with an optional offline-selected tactic."""
+    """FP16/BF16 decode DualGEMM; -1 selects automatically, 0/1/2 override."""
     return torch.ops.sglang.cutedsl_hopper_dual_gemm_swiglu(x, gate_up_weight, tactic)
