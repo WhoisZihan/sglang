@@ -31,6 +31,13 @@ def jit_vectorized(x, quick):
     return out
 
 
+def jit_scalar(x, quick):
+    # Launch width=1 directly, regardless of input size or pointer alignment.
+    out = torch.empty_like(x)
+    _gelu_module(x.dtype, quick, force_scalar=True).run(x, out)
+    return out
+
+
 @marker.parametrize("op", ["new", "quick"])
 @marker.parametrize(
     "dtype", [torch.float16, torch.bfloat16, torch.float32], [torch.bfloat16]
@@ -62,11 +69,13 @@ def jit_vectorized(x, quick):
     ],
     [32, 127, 256, 257, 512, 4096, 65536],
 )
-@marker.benchmark("impl", ["jit", "vectorized", "torch"])
+@marker.benchmark("impl", ["jit", "vectorized", "scalar", "torch"])
 def benchmark(op, dtype, size, impl):
     x = create_random(size, dtype=dtype)
     if impl == "vectorized":
         return marker.do_bench(jit_vectorized, input_args=(x, op == "quick"))
+    if impl == "scalar":
+        return marker.do_bench(jit_scalar, input_args=(x, op == "quick"))
     fn = OPS[op][0 if impl == "jit" else 1]
     # marker rotates inputs and outputs to measure with cold L2.
     return marker.do_bench(fn, input_args=(x,))

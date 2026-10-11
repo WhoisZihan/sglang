@@ -17,15 +17,26 @@ if TYPE_CHECKING:
 
 
 @cache_once
-def _gelu_module(dtype: torch.dtype, quick: bool, scalar_small: bool = True) -> Module:
+def _gelu_module(
+    dtype: torch.dtype,
+    quick: bool,
+    scalar_small: bool = True,
+    force_scalar: bool = False,
+) -> Module:
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise RuntimeError(f"Unsupported GELU dtype: {dtype}")
     args = make_cpp_args(dtype, quick, is_arch_support_pdl(), scalar_small)
+    if force_scalar:
+        scalar_args = make_cpp_args(dtype, quick, is_arch_support_pdl(), 1)
+        wrapper = f"launch_gelu<{scalar_args}>"
+    else:
+        wrapper = f"gelu<{args}>"
     return load_jit(
         "unary_gelu",
         *args,
+        "scalar" if force_scalar else "dispatch",
         cuda_files=["elementwise/gelu.cuh"],
-        cuda_wrappers=[("run", f"gelu<{args}>")],
+        cuda_wrappers=[("run", wrapper)],
     )
 
 
