@@ -14,7 +14,10 @@ import torch
 
 from sglang.kernels.ops.activation import silu_and_mul
 from sglang.kernels.ops.gemm import hopper_dual_gemm_swiglu
-from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import HOPPER_DUAL_GEMM_TACTICS
+from sglang.kernels.ops.gemm.cutedsl_hopper_dual_gemm import (
+    HOPPER_DUAL_GEMM_TACTICS,
+    _pick_hopper_tactic,
+)
 
 
 def _time(fn, repetitions):
@@ -52,11 +55,11 @@ def main():
     parser.add_argument(
         "--output", type=Path, help="Write clean JSONL separately from JIT logs"
     )
-    parser.add_argument("--tactics", nargs="+", type=int, default=[0, 1, 2])
+    parser.add_argument("--tactics", nargs="+", type=int, default=[-1, 0, 1, 2])
     args = parser.parse_args()
     if max(args.tokens) > 16:
         parser.error("this backend targets decode with at most 16 tokens")
-    if any(t < 0 or t >= len(HOPPER_DUAL_GEMM_TACTICS) for t in args.tactics):
+    if any(t < -1 or t >= len(HOPPER_DUAL_GEMM_TACTICS) for t in args.tactics):
         parser.error("invalid tactic")
     if (
         min(
@@ -91,6 +94,9 @@ def main():
         "rotation": args.rotation,
         "hidden": args.hidden,
         "intermediate": args.intermediate,
+        "multiprocessor_count": torch.cuda.get_device_properties(
+            torch.cuda.current_device()
+        ).multi_processor_count,
         "weight_bytes_per_rotation": 6 * args.hidden * args.intermediate,
         "front_weight_bytes_total": 4 * args.hidden * args.intermediate * args.rotation,
         "mlp_weight_bytes_total": 6 * args.hidden * args.intermediate * args.rotation,
@@ -116,6 +122,17 @@ def main():
             return silu_and_mul(torch.nn.functional.linear(x, w))
 
         for tactic in args.tactics:
+            selected_tactic = (
+                _pick_hopper_tactic(
+                    m,
+                    args.hidden,
+                    args.intermediate,
+                    metadata["multiprocessor_count"],
+                    dtype,
+                )
+                if tactic == -1
+                else tactic
+            )
             max_abs, relative_l2 = 0.0, 0.0
             for x, w, down in zip(inputs, weights, downs, strict=True):
                 actual = hopper_dual_gemm_swiglu(x, w, tactic)
@@ -136,7 +153,8 @@ def main():
             row = {
                 "tokens": m,
                 "tactic": tactic,
-                "configuration": HOPPER_DUAL_GEMM_TACTICS[tactic],
+                "selected_tactic": selected_tactic,
+                "configuration": HOPPER_DUAL_GEMM_TACTICS[selected_tactic],
                 "front_max_abs_error": max_abs,
                 "front_relative_l2_error": relative_l2,
             }

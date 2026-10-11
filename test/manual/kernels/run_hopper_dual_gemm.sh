@@ -9,7 +9,7 @@ Stages: check, compile, debug, unit, bench, sanitizer, all
 all = check + compile + unit + bench; sanitizer is explicitly requested.
 Environment: CUDA_VISIBLE_DEVICES (default 0), PYTHON (default python),
 BENCH_RUNS (default 1), BENCH_DTYPES (default bf16), REPETITIONS (default 50).
-bench tests TP1/TP4 local widths, rotation 1/4, and tokens 1/2/4/8/9/16, and all three tactics.
+bench tests TP1/TP4 local widths, rotation 1/4, tokens 1/2/4/8/9/16, auto dispatch and all three explicit tactics.
 EOF
 }
 

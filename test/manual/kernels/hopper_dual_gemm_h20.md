@@ -117,13 +117,30 @@ BENCH_RUNS=3 BENCH_DTYPES="bf16 fp16" \
 ```
 
 The sweep covers M=1/2/4/8/9/16, hidden=4096, intermediate=14336/3584, rotation
-1/4, and tactics 0/1/2. Tactics are `(features, reduction, stages)`:
+1/4, auto dispatch (`tactic=-1`), and explicit tactics 0/1/2. Tactics are
+`(features, reduction, stages)`:
 
 - 0: `(64, 128, 3)`
 - 1: `(128, 128, 3)`
 - 2: `(64, 64, 5)`
 
-The initial default is tactic 0; this is not a measured tuning conclusion.
+Default calls (`tactic=-1`) select tactic 2 for BF16, K=4096, I=3584 and
+M=1..16 on a 114-SM Hopper GPU. This policy is calibrated from H100 PCIe
+measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 2
+with both rotation counts. Other SM counts, FP16, and unmeasured K/I retain
+tactic 0; the measured I=14336 cases also favored tactic 0. This is a host-side
+rule with no timed autotuning or device synchronization in forward. Explicit
+tactics continue to override the rule, and auto/explicit calls share the same
+compiled specialization cache. Benchmark records include both the requested
+`tactic` and `selected_tactic`; auto rows are measured separately rather than
+copied from explicit-tactic timings. The default BF16 sweep now emits 96 rows.
+
+The three candidates are the current Hopper search space, not an architecture
+limit. Blackwell's paired two-CTA MMA tactics require SM100 MMA/TMEM mechanisms
+and cannot be copied into this WGMMA backend. Additional Hopper K tiles,
+pipeline depths and warpgroup layouts need their own correctness and profiling
+evidence before extending the candidate list.
+
 The comparison is one merged gate/up linear plus SGLang SwiGLU, and reports
 front-half and complete local MLP (including the same down projection) separately.
 The two widths simulate TP1/TP4 local dimensions, without communication.
