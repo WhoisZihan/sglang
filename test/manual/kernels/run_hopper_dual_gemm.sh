@@ -38,12 +38,12 @@ run_logged() {
 check() {
     git rev-parse HEAD > "$out/revision.txt"
     nvidia-smi > "$out/nvidia-smi.txt"
-    "$py" -m pip freeze > "$out/packages.txt"
     run_logged environment "$py" - <<'PY'
 import json
 import os
 import shutil
 import subprocess
+import sys
 
 import cutlass
 import torch
@@ -67,6 +67,7 @@ print(json.dumps({
     "gpu": props.name, "capability": cap, "sm_count": props.multi_processor_count,
     "memory_bytes": props.total_memory, "torch": torch.__version__,
     "torch_cuda": torch.version.cuda, "sglang_source": sglang.__file__,
+    "python_executable": sys.executable,
     "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
     "jit_target": target,
     "cutlass_dsl": cutlass.__version__, "nvcc": nvcc,

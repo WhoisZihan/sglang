@@ -34,7 +34,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh check /tmp/h20-dualgemm-dsl
 ```
 
 The check records GPU, compute capability, SM count, PyTorch/CUDA/CuTe versions,
-source location, package list, and nvcc version when available. The kernel
+source location, Python executable, and nvcc version when available. The kernel
 compilation target is explicitly `sm_90a`. Source fingerprints from the old
 `SGLANG_JIT_CACHE_DIR` do not control this DSL operator.
 
@@ -104,7 +104,7 @@ tar -czf /tmp/h20-dualgemm-dsl-results.tar.gz -C /tmp h20-dualgemm-dsl
 
 Sanitizer runs memcheck/racecheck/synccheck with nonzero error exit status.
 Send `environment.log`, `compile.log`, `unit.log`, `bench-*.jsonl` and sanitizer
-logs. If a stage fails, include its `.log` and package/revision metadata. Repeat
+logs. If a stage fails, include its `.log` and environment/revision metadata. Repeat
 measurements on an idle GPU under consistent power/clock settings. H20 results
 apply to H20; H100/H200 need their own calibration. Choose default tactics and
 model eligibility using stable complete-MLP results, including regressions.
