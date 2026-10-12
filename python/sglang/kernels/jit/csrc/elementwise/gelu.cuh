@@ -80,10 +80,10 @@ void gelu(tvm::ffi::TensorView input, tvm::ffi::TensorView out) {
   constexpr uint32_t kVecSize = device::kMaxVecBytes / sizeof(T);
   const auto aligned = (reinterpret_cast<uintptr_t>(input.data_ptr()) % device::kMaxVecBytes == 0) &&
                        (reinterpret_cast<uintptr_t>(out.data_ptr()) % device::kMaxVecBytes == 0);
-  // A single CTA can give every small-input element its own thread. Vectorizing
-  // here serializes 4/8 activations per lane and makes a partial vector diverge
-  // from the full-vector lanes in the same warp.
-  if (aligned && (!kScalarSmall || input.numel() > 256)) {
+  // Scalar accesses provide more parallel work for small/medium inputs.
+  // Benchmarks favor scalar through 64K elements and vectors at 1M elements.
+  // Keep the vectorized path for larger inputs to reduce memory instructions.
+  if (aligned && (!kScalarSmall || input.numel() > 65536)) {
     launch_gelu<T, kQuick, kUsePDL, kVecSize>(input, out);
   } else {
     launch_gelu<T, kQuick, kUsePDL, 1>(input, out);

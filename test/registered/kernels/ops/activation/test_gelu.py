@@ -56,6 +56,9 @@ def assert_result(fn, x, result):
         (512,),
         (513,),
         (4097,),
+        (65535,),
+        (65536,),
+        (65537,),
         (2, 3, 513),
     ],
 )
@@ -68,7 +71,7 @@ def test_gelu_shapes_and_tail(fn, dtype, shape):
 @pytest.mark.parametrize("fn", OPS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("offset", [0, 1])
-@pytest.mark.parametrize("size", [127, 257, 513])
+@pytest.mark.parametrize("size", [127, 65536, 65537])
 def test_gelu_out_alignment(fn, dtype, offset, size):
     # Contiguous slices can still have pointers misaligned for vector loads/stores.
     x = torch.randn(size + 3, dtype=dtype, device="cuda")[offset : offset + size]

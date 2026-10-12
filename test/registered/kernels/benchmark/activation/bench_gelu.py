@@ -1,9 +1,11 @@
+import itertools
+
 import torch
 import torch.nn.functional as F
 
 from sglang.kernels.jit.benchmark import marker
 from sglang.kernels.jit.benchmark.utils import create_random
-from sglang.kernels.ops.activation.gelu import _gelu_module, new_gelu, quick_gelu
+from sglang.kernels.ops.activation.gelu import new_gelu, quick_gelu
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(
@@ -22,64 +24,36 @@ def torch_quick_gelu(x):
 
 
 OPS = {"new": (new_gelu, torch_new_gelu), "quick": (quick_gelu, torch_quick_gelu)}
+DTYPES = [torch.float16]
+SIZES = [
+    1,
+    128,
+    4096,
+    65536,
+    1048576,
+]
 
 
-def jit_vectorized(x, quick):
-    # Preserve the original vector-width selection as an A/B baseline.
-    out = torch.empty_like(x)
-    _gelu_module(x.dtype, quick, scalar_small=False).run(x, out)
-    return out
-
-
-def jit_scalar(x, quick):
-    # Launch width=1 directly, regardless of input size or pointer alignment.
-    out = torch.empty_like(x)
-    _gelu_module(x.dtype, quick, force_scalar=True).run(x, out)
-    return out
-
-
-@marker.parametrize("op", ["new", "quick"])
-@marker.parametrize(
-    "dtype", [torch.float16, torch.bfloat16, torch.float32], [torch.bfloat16]
-)
-@marker.parametrize(
-    "size",
-    [
-        1,
-        7,
-        8,
-        9,
-        31,
-        32,
-        33,
-        64,
-        127,
-        128,
-        129,
-        255,
-        256,
-        257,
-        511,
-        512,
-        513,
-        1024,
-        4096,
-        65536,
-        1048576,
-    ],
-    [32, 127, 256, 257, 512, 4096, 65536],
-)
-@marker.benchmark("impl", ["jit", "vectorized", "scalar", "torch"])
-def benchmark(op, dtype, size, impl):
+def benchmark(op, dtype, size):
     x = create_random(size, dtype=dtype)
-    if impl == "vectorized":
-        return marker.do_bench(jit_vectorized, input_args=(x, op == "quick"))
-    if impl == "scalar":
-        return marker.do_bench(jit_scalar, input_args=(x, op == "quick"))
-    fn = OPS[op][0 if impl == "jit" else 1]
-    # marker rotates inputs and outputs to measure with cold L2.
-    return marker.do_bench(fn, input_args=(x,))
+    # Both implementations use the same cold-L2 measurement and quantile.
+    jit, torch_impl = OPS[op]
+    jit_s = marker.do_bench(jit, input_args=(x,)).times[0]
+    torch_s = marker.do_bench(torch_impl, input_args=(x,)).times[0]
+    return jit_s * 1e6, torch_s * 1e6, torch_s / jit_s
+
+
+def main():
+    print(
+        f"{'op':>6} {'dtype':>10} {'size':>10} | {'JIT(us)':>10} {'torch(us)':>10} {'speedup':>9}"
+    )
+    for op, dtype, size in itertools.product(OPS, DTYPES, SIZES):
+        jit_us, torch_us, speedup = benchmark(op, dtype, size)
+        print(
+            f"{op:>6} {str(dtype).removeprefix('torch.'):>10} {size:>10} | "
+            f"{jit_us:>10.4f} {torch_us:>10.4f} {speedup:>8.2f}x"
+        )
 
 
 if __name__ == "__main__":
-    benchmark.run()
+    main()
