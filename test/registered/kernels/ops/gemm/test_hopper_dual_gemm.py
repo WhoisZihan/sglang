@@ -104,7 +104,7 @@ class TestHopperDualGemm(CustomTestCase):
         x, w = self._inputs(17, 128, 128, torch.bfloat16)
         with self.assertRaisesRegex(ValueError, "at most 16"):
             hopper_dual_gemm_swiglu(x, w)
-        for tactic in (-2, 0, 4):
+        for tactic in (-2, 0, 5):
             with self.assertRaisesRegex(ValueError, "tactic"):
                 hopper_dual_gemm_swiglu(x[:1], w, tactic)
 
