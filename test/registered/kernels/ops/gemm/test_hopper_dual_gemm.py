@@ -104,7 +104,7 @@ class TestHopperDualGemm(CustomTestCase):
         x, w = self._inputs(17, 128, 128, torch.bfloat16)
         with self.assertRaisesRegex(ValueError, "at most 16"):
             hopper_dual_gemm_swiglu(x, w)
-        for tactic in (-2, 2, 3, 5):
+        for tactic in (-2, 0, 4):
             with self.assertRaisesRegex(ValueError, "tactic"):
                 hopper_dual_gemm_swiglu(x[:1], w, tactic)
 
@@ -112,7 +112,7 @@ class TestHopperDualGemm(CustomTestCase):
         # The measured winning configuration must not leak into unmeasured
         # reductions, widths, dtypes or GPU topologies.
         for m in (1, 2, 4, 8, 9, 16):
-            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 4)
+            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 3)
         for m, k, n, sms, dtype in (
             (0, 4096, 3584, 114, torch.bfloat16),
             (8, 4096, 14336, 114, torch.bfloat16),
@@ -122,7 +122,7 @@ class TestHopperDualGemm(CustomTestCase):
             (8, 4096, 3584, 132, torch.bfloat16),
         ):
             with self.subTest(m=m, k=k, n=n, sms=sms, dtype=dtype):
-                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 1)
+                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 2)
 
     def test_auto_dispatch_reuses_explicit_specialization(self):
         # Auto and explicit selection must use the same device specialization;
