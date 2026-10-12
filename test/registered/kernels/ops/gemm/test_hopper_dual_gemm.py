@@ -53,7 +53,7 @@ class TestHopperDualGemm(CustomTestCase):
 
     def test_short_pipeline_and_wraparound_with_tails(self):
         for dtype in (torch.bfloat16, torch.float16):
-            for tactic in range(len(HOPPER_DUAL_GEMM_TACTICS)):
+            for tactic in HOPPER_DUAL_GEMM_TACTICS:
                 for m, n, k in (
                     (1, 1, 64),  # single stage, padded K for K=128 tactics
                     (1, 64, 128),  # singleton X row must retain a 2D TMA map
@@ -104,7 +104,7 @@ class TestHopperDualGemm(CustomTestCase):
         x, w = self._inputs(17, 128, 128, torch.bfloat16)
         with self.assertRaisesRegex(ValueError, "at most 16"):
             hopper_dual_gemm_swiglu(x, w)
-        for tactic in (-2, len(HOPPER_DUAL_GEMM_TACTICS)):
+        for tactic in (-2, 2, 3, 5):
             with self.assertRaisesRegex(ValueError, "tactic"):
                 hopper_dual_gemm_swiglu(x[:1], w, tactic)
 
@@ -112,7 +112,7 @@ class TestHopperDualGemm(CustomTestCase):
         # The measured winning configuration must not leak into unmeasured
         # reductions, widths, dtypes or GPU topologies.
         for m in (1, 2, 4, 8, 9, 16):
-            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 2)
+            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 4)
         for m, k, n, sms, dtype in (
             (0, 4096, 3584, 114, torch.bfloat16),
             (8, 4096, 14336, 114, torch.bfloat16),
@@ -122,7 +122,7 @@ class TestHopperDualGemm(CustomTestCase):
             (8, 4096, 3584, 132, torch.bfloat16),
         ):
             with self.subTest(m=m, k=k, n=n, sms=sms, dtype=dtype):
-                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 0)
+                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 1)
 
     def test_auto_dispatch_reuses_explicit_specialization(self):
         # Auto and explicit selection must use the same device specialization;
@@ -132,7 +132,7 @@ class TestHopperDualGemm(CustomTestCase):
         for m in (1, 9):
             x, w = self._inputs(m, 3584, 4096, torch.bfloat16)
             chosen = _pick_hopper_tactic(m, 4096, 3584, sms, x.dtype)
-            for tactic in range(len(HOPPER_DUAL_GEMM_TACTICS)):
+            for tactic in HOPPER_DUAL_GEMM_TACTICS:
                 _COMPILED.pop((device, x.dtype, m, 3584, 4096, tactic), None)
             self._check(x, w)
             key = (device, x.dtype, m, 3584, 4096, chosen)
