@@ -28,7 +28,13 @@ from sglang.srt.utils.common import direct_register_custom_op
 MAX_HOPPER_DUAL_GEMM_TOKENS = 16
 # (features, reduction, stages). Exposed for offline performance selection;
 # benchmark all tactics before admitting a shape to the model fast path.
-HOPPER_DUAL_GEMM_TACTICS = ((64, 128, 3), (128, 128, 3), (64, 64, 5))
+# Match Blackwell BF16/FP16 single-CTA IDs; 2/3 are reserved for its
+# two-CTA MMA configurations. ID 4 is the Hopper-specific K=64 candidate.
+HOPPER_DUAL_GEMM_TACTICS = {
+    0: (128, 128, 3),
+    1: (64, 128, 3),
+    4: (64, 64, 5),
+}
 _COMPILED = {}
 
 
@@ -40,9 +46,9 @@ def _pick_hopper_tactic(
     input_dtype: torch.dtype,
 ) -> int:
     """Select an offline-measured tactic without tuning inside forward."""
-    # H100 PCIe (114 SMs), BF16, K=4096: tactic 2 beat tactic 0 for
+    # H100 PCIe (114 SMs), BF16, K=4096: tactic 4 beat tactic 1 for
     # I=3584 at M=1/2/4/8/9/16 with both one and four rotating weight sets.
-    # I=14336 favored tactic 0. Keep the original default for unmeasured
+    # I=14336 favored tactic 1. Keep the original default for unmeasured
     # widths, reductions, dtypes and SM counts (including H20/H200).
     if (
         1 <= num_tokens <= MAX_HOPPER_DUAL_GEMM_TOKENS
@@ -51,8 +57,8 @@ def _pick_hopper_tactic(
         and multiprocessor_count == 114
         and input_dtype == torch.bfloat16
     ):
-        return 2
-    return 0
+        return 4
+    return 1
 
 
 class HopperDualGemmKernel:
@@ -358,7 +364,7 @@ def _run(
             torch.cuda.get_device_properties(x.device).multi_processor_count,
             x.dtype,
         )
-    if not 0 <= tactic < len(HOPPER_DUAL_GEMM_TACTICS):
+    if tactic not in HOPPER_DUAL_GEMM_TACTICS:
         raise ValueError("invalid Hopper DualGEMM tactic")
     out = torch.empty((m, n), device=x.device, dtype=x.dtype)
     if m == 0:
@@ -402,5 +408,5 @@ direct_register_custom_op(
 def hopper_dual_gemm_swiglu(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ) -> torch.Tensor:
-    """FP16/BF16 decode DualGEMM; -1 selects automatically, 0/1/2 override."""
+    """FP16/BF16 decode DualGEMM; -1 selects automatically, 0/1/4 override."""
     return torch.ops.sglang.cutedsl_hopper_dual_gemm_swiglu(x, gate_up_weight, tactic)
