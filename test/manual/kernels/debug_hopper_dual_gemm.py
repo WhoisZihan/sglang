@@ -45,7 +45,7 @@ def main():
                 "cutlass": cutlass.__version__,
                 "shape": [m, n, k],
                 "dtype": str(x.dtype),
-                "tactic": 0,
+                "tactic": 1,
                 "redistribute_registers": not args.static_registers,
                 "dump_dir": os.environ.get("CUTE_DSL_DUMP_DIR"),
             }
@@ -58,7 +58,7 @@ def main():
         cuda.CUstream(torch.cuda.current_stream().cuda_stream),
     )
     compiled = cute.compile(
-        HopperDualGemmKernel(m, 0, redistribute_registers=not args.static_registers),
+        HopperDualGemmKernel(m, 1, redistribute_registers=not args.static_registers),
         *arguments,
         options="--gpu-arch=sm_90a --generate-line-info --keep-ptx --keep-cubin",
     )

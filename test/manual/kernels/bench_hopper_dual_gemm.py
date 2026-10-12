@@ -55,11 +55,13 @@ def main():
     parser.add_argument(
         "--output", type=Path, help="Write clean JSONL separately from JIT logs"
     )
-    parser.add_argument("--tactics", nargs="+", type=int, default=[-1, 0, 1, 2])
+    parser.add_argument(
+        "--tactics", nargs="+", type=int, default=[-1, *HOPPER_DUAL_GEMM_TACTICS]
+    )
     args = parser.parse_args()
     if max(args.tokens) > 16:
         parser.error("this backend targets decode with at most 16 tokens")
-    if any(t < -1 or t >= len(HOPPER_DUAL_GEMM_TACTICS) for t in args.tactics):
+    if any(t != -1 and t not in HOPPER_DUAL_GEMM_TACTICS for t in args.tactics):
         parser.error("invalid tactic")
     if (
         min(
@@ -89,6 +91,7 @@ def main():
         "cuda": torch.version.cuda,
         "cutlass": cutlass.__version__,
         "backend": "cute_dsl_sm90a_tma_warp_specialized",
+        "tactic_schema": "hopper_blackwell_aligned_v1",
         "tactics": HOPPER_DUAL_GEMM_TACTICS,
         "dtype": args.dtype,
         "rotation": args.rotation,

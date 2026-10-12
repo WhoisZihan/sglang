@@ -85,7 +85,7 @@ for dtype in (torch.bfloat16, torch.float16):
     for m in (1, 9):
         x = torch.randn(m, 128, device="cuda", dtype=dtype) * 0.25
         w = torch.randn(130, 128, device="cuda", dtype=dtype) * 0.1
-        for tactic in range(len(HOPPER_DUAL_GEMM_TACTICS)):
+        for tactic in HOPPER_DUAL_GEMM_TACTICS:
             print(f"Compiling/running dtype={dtype}, M={m}, tactic={tactic}", flush=True)
             y = hopper_dual_gemm_swiglu(x, w, tactic)
             torch.cuda.synchronize()

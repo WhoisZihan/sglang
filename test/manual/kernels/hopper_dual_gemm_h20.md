@@ -68,7 +68,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh debug /tmp/h20-dualgemm-debug
 
 This runs four separate processes under compute-sanitizer memcheck, retaining
 line information, PTX and CUBIN. The first reproduces BF16 M=1, I=65, K=128,
-tactic 0. The second removes dynamic register redistribution only. The last
+tactic 1 (legacy ID 0). The second removes dynamic register redistribution only. The last
 two use M=8, I=64 to remove feature/token padding, with and without register
 redistribution. TMA, WGMMA, warp specialization and the pipeline remain active
 in all cases. These are diagnostic variants, not performance measurements.
@@ -117,18 +117,23 @@ BENCH_RUNS=3 BENCH_DTYPES="bf16 fp16" \
 ```
 
 The sweep covers M=1/2/4/8/9/16, hidden=4096, intermediate=14336/3584, rotation
-1/4, auto dispatch (`tactic=-1`), and explicit tactics 0/1/2. Tactics are
+1/4, auto dispatch (`tactic=-1`), and explicit tactics 0/1/4. Tactics are
 `(features, reduction, stages)`:
 
-- 0: `(64, 128, 3)`
-- 1: `(128, 128, 3)`
-- 2: `(64, 64, 5)`
+- 0: `(128, 128, 3)` — Blackwell wide single-CTA ID
+- 1: `(64, 128, 3)` — Blackwell narrow single-CTA ID
+- 4: `(64, 64, 5)` — Hopper-specific candidate
 
-Default calls (`tactic=-1`) select tactic 2 for BF16, K=4096, I=3584 and
+IDs 2/3 are reserved for Blackwell two-CTA MMA and rejected on Hopper.
+Historical Hopper logs use legacy IDs: `0 -> 1`, `1 -> 0`, `2 -> 4`.
+New JSONL metadata declares `tactic_schema=hopper_blackwell_aligned_v1` and
+uses an ID-to-configuration map rather than a positional list.
+
+Default calls (`tactic=-1`) select tactic 4 for BF16, K=4096, I=3584 and
 M=1..16 on a 114-SM Hopper GPU. This policy is calibrated from H100 PCIe
-measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 2
+measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 4
 with both rotation counts. Other SM counts, FP16, and unmeasured K/I retain
-tactic 0; the measured I=14336 cases also favored tactic 0. This is a host-side
+tactic 1; the measured I=14336 cases also favored tactic 1. This is a host-side
 rule with no timed autotuning or device synchronization in forward. Explicit
 tactics continue to override the rule, and auto/explicit calls share the same
 compiled specialization cache. Benchmark records include both the requested
@@ -164,7 +169,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh sanitizer /tmp/h20-dualgemm-dsl
 # Profile one configuration and inspect registers, spills, memory and stalls.
 ncu --set full --target-processes all \
   python test/manual/kernels/bench_hopper_dual_gemm.py \
-  --tokens 8 --tactics 0 --intermediate 14336 --rotation 4 --repetitions 1
+  --tokens 8 --tactics 1 --intermediate 14336 --rotation 4 --repetitions 1
 
 tar -czf /tmp/h20-dualgemm-dsl-results.tar.gz -C /tmp h20-dualgemm-dsl
 ```

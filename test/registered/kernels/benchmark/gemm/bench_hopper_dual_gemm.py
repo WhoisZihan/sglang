@@ -15,7 +15,7 @@ register_cuda_ci(
 @marker.parametrize("tokens", [1, 2, 4, 8, 9, 16], [8])
 @marker.parametrize("intermediate", [14336, 3584], [3584])
 @marker.parametrize("dtype", [torch.bfloat16, torch.float16], [torch.bfloat16])
-@marker.parametrize("tactic", [-1, 0, 1, 2], [-1])
+@marker.parametrize("tactic", [-1, 0, 1, 4], [-1])
 @marker.parametrize("full_mlp", [False, True])
 @marker.benchmark("implementation", ["merged", "dual"])
 def benchmark(tokens, intermediate, dtype, tactic, full_mlp, implementation):
