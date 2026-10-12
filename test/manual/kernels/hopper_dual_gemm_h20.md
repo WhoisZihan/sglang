@@ -45,7 +45,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh compile /tmp/h20-dualgemm-dsl
 bash test/manual/kernels/run_hopper_dual_gemm.sh unit /tmp/h20-dualgemm-dsl
 ```
 
-Compilation covers BF16/FP16, both token tiles (8 and 16), and all three tactics.
+Compilation covers BF16/FP16, both token tiles (8 and 16), and all four tactics.
 The compile smoke checks launch and finite output. Unit tests verify independent
 FP64 references with low-precision projection rounding, all tactics, short
 pipelines, feature/token/K padding, ring-buffer wraparound, graph replay with
@@ -117,12 +117,13 @@ BENCH_RUNS=3 BENCH_DTYPES="bf16 fp16" \
 ```
 
 The sweep covers M=1/2/4/8/9/16, hidden=4096, intermediate=14336/3584, rotation
-1/4, auto dispatch (`tactic=-1`), and explicit tactics 1/2/3. Tactics are
+1/4, auto dispatch (`tactic=-1`), and explicit tactics 1/2/3/4. Tactics are
 `(features, reduction, stages)`:
 
 - 1: `(128, 128, 3)` — wide CTA
 - 2: `(64, 128, 3)` — narrow CTA
 - 3: `(64, 64, 5)` — narrow CTA with a shorter K tile
+- 4: `(128, 64, 3)` — experimental wide CTA with a shorter K tile; not selected by auto
 
 IDs are local to Hopper. Historical zero-based logs map as `0 -> 2`,
 `1 -> 1`, `2 -> 3`; the short-lived Blackwell-aligned IDs map as
@@ -143,9 +144,9 @@ rule with no timed autotuning or device synchronization in forward. Explicit
 tactics continue to override the rule, and auto/explicit calls share the same
 compiled specialization cache. Benchmark records include both the requested
 `tactic` and `selected_tactic`; auto rows are measured separately rather than
-copied from explicit-tactic timings. The default BF16 sweep now emits 96 rows.
+copied from explicit-tactic timings. The default BF16 sweep now emits 120 rows.
 
-The three candidates are the current Hopper search space, not an architecture
+The four candidates are the current Hopper search space, not an architecture
 limit. Blackwell's paired two-CTA MMA tactics require SM100 MMA/TMEM mechanisms
 and cannot be copied into this WGMMA backend. Additional Hopper K tiles,
 pipeline depths and warpgroup layouts need their own correctness and profiling
@@ -170,7 +171,7 @@ python test/registered/kernels/benchmark/gemm/bench_hopper_dual_gemm.py
 ## Representative performance scan
 
 ```bash
-BENCH_RUNS=3 bash test/manual/kernels/run_hopper_dual_gemm.sh bench-scan /tmp/hopper-size-scan
+BENCH_RUNS=2 bash test/manual/kernels/run_hopper_dual_gemm.sh bench-scan /tmp/hopper-size-scan
 ```
 
 This separate stage leaves `bench` and `all` unchanged. It measures these six
@@ -187,12 +188,30 @@ K/I pairs rather than their Cartesian product:
 
 Each pair runs M=1/8/9/16, covering single-token decode and both sides of the
 token-tile boundary. Rotation is fixed at 4 to keep the sweep small. BF16 and
-FP16, auto and explicit tactics 1/2/3 are all included, with the same front and
-full-MLP correctness checks before timing. One run produces 192 rows in 12
-processes; three runs produce 576 rows. Set `BENCH_DTYPES=bf16` for a half-sized
+FP16, auto and explicit tactics 1/2/3/4 are all included, with the same front and
+full-MLP correctness checks before timing. One run produces 240 rows in 12
+processes; two runs produce 480 rows. Set `BENCH_DTYPES=bf16` for a half-sized
 first pass. Filenames include K and I so different reductions cannot overwrite
 one another. New results should calibrate dispatch; the scan does not modify
 the existing measured selection policy.
+
+Two runs are sufficient for an initial comparison on an otherwise idle GPU.
+In the existing three-run H100 scan, the first two runs selected the same
+fastest explicit tactic for all 48 shapes; all three possible run pairs agreed
+with the three-run choice (144/144 comparisons). Two-run mean MLP latency
+estimates differed from three-run medians by 0.012% at the median and 0.222%
+at most. These observations cover tactics 1/2/3, not the new tactic 4.
+Use a third run if tactic 4 is close to the winner (roughly within 0.5%),
+the first two disagree, or before calibrating a new default. The variable is
+`BENCH_RUNS`; `BENCH_GPUS` is not used by this script.
+
+Tactic 4 preserves the 128-feature CTA but halves the K tile. Its data buffers
+occupy about 99/102 KiB for token tiles 8/16, compared with tactic 1's
+198/204 KiB. This permits two CTAs within H100's shared-memory budget, but
+actual occupancy still depends on compiled register use and allocation.
+Compilation and numerical tests include tactic 4 automatically; benchmark
+metadata records its configuration so historical IDs remain unambiguous.
+Auto dispatch remains restricted to the previously measured tactics 2/3.
 
 ## Sanitizers, profiling and return files
 

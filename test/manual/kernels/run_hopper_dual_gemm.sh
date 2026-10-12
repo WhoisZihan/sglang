@@ -9,7 +9,7 @@ Stages: check, compile, debug, unit, bench, bench-scan, sanitizer, all
 all = check + compile + unit + bench; sanitizer is explicitly requested.
 Environment: CUDA_VISIBLE_DEVICES (default 0), PYTHON (default python),
 BENCH_RUNS (default 1), BENCH_DTYPES (default bf16), REPETITIONS (default 50).
-bench tests TP1/TP4 local widths, rotation 1/4, tokens 1/2/4/8/9/16, auto dispatch and all three explicit tactics.
+bench tests TP1/TP4 local widths, rotation 1/4, tokens 1/2/4/8/9/16, auto dispatch and all four explicit tactics.
 bench-scan tests six representative K/I pairs, tokens 1/8/9/16, rotation 4,
 and defaults to both bf16/fp16; BENCH_DTYPES and BENCH_RUNS override these.
 EOF
@@ -92,7 +92,7 @@ for dtype in (torch.bfloat16, torch.float16):
             y = hopper_dual_gemm_swiglu(x, w, tactic)
             torch.cuda.synchronize()
             assert torch.isfinite(y).all().item()
-print("All twelve tactic/dtype/token-tile specializations compiled and launched.", flush=True)
+print(f"All {4 * len(HOPPER_DUAL_GEMM_TACTICS)} tactic/dtype/token-tile specializations compiled and launched.", flush=True)
 PY
 }
 
