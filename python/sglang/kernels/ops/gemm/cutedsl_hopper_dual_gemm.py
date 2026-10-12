@@ -46,16 +46,16 @@ def _pick_hopper_tactic(
     input_dtype: torch.dtype,
 ) -> int:
     """Select an offline-measured tactic without tuning inside forward."""
-    # H100 PCIe (114 SMs), BF16, K=4096: tactic 3 beat tactic 2 for
-    # I=3584 at M=1/2/4/8/9/16 with both one and four rotating weight sets.
-    # I=14336 favored tactic 2. Keep the original default for unmeasured
-    # widths, reductions, dtypes and SM counts (including H20/H200).
+    # H100 PCIe (114 SMs), BF16/FP16: complete-MLP measurements at
+    # M=1/8/9/16 with four rotating weight sets favored tactic 3 for these
+    # exact K/I pairs. Wider measured pairs favored tactic 2. Keep the
+    # original default for unmeasured pairs and other SM counts.
     if (
         1 <= num_tokens <= MAX_HOPPER_DUAL_GEMM_TOKENS
-        and hidden_size == 4096
-        and intermediate_size == 3584
+        and (hidden_size, intermediate_size)
+        in ((2048, 7168), (4096, 3584), (4096, 7168))
         and multiprocessor_count == 114
-        and input_dtype == torch.bfloat16
+        and input_dtype in (torch.bfloat16, torch.float16)
     ):
         return 3
     return 2
