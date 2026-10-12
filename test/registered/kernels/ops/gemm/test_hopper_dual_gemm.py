@@ -111,36 +111,50 @@ class TestHopperDualGemm(CustomTestCase):
     def test_auto_dispatch_preserves_unmeasured_regimes(self):
         # The measured winning configuration must not leak into unmeasured
         # reductions, widths, dtypes or GPU topologies.
-        for m in (1, 2, 4, 8, 9, 16):
-            self.assertEqual(_pick_hopper_tactic(m, 4096, 3584, 114, torch.bfloat16), 3)
-        for m, k, n, sms, dtype in (
-            (0, 4096, 3584, 114, torch.bfloat16),
-            (8, 4096, 14336, 114, torch.bfloat16),
-            (8, 4096, 3584, 114, torch.float16),
-            (8, 2048, 3584, 114, torch.bfloat16),
-            (8, 4096, 4096, 114, torch.bfloat16),
-            (8, 4096, 3584, 132, torch.bfloat16),
+        pairs = ((2048, 7168), (4096, 3584), (4096, 7168))
+        for k, n in pairs:
+            for dtype in (torch.bfloat16, torch.float16):
+                for m in range(1, 17):
+                    with self.subTest(m=m, k=k, n=n, dtype=dtype):
+                        self.assertEqual(_pick_hopper_tactic(m, k, n, 114, dtype), 3)
+                for m in (0, 17):
+                    self.assertEqual(_pick_hopper_tactic(m, k, n, 114, dtype), 2)
+                for sms in (78, 132):
+                    self.assertEqual(_pick_hopper_tactic(8, k, n, sms, dtype), 2)
+            self.assertEqual(_pick_hopper_tactic(8, k, n, 114, torch.float32), 2)
+        for k, n in (
+            (4096, 14336),
+            (4096, 18944),
+            (8192, 14336),
+            (2048, 3584),
+            (4096, 4096),
+            (4096, 7169),
+            (8192, 7168),
         ):
-            with self.subTest(m=m, k=k, n=n, sms=sms, dtype=dtype):
-                self.assertEqual(_pick_hopper_tactic(m, k, n, sms, dtype), 2)
+            for dtype in (torch.bfloat16, torch.float16):
+                with self.subTest(k=k, n=n, dtype=dtype):
+                    self.assertEqual(_pick_hopper_tactic(8, k, n, 114, dtype), 2)
 
     def test_auto_dispatch_reuses_explicit_specialization(self):
-        # Auto and explicit selection must use the same device specialization;
-        # test both token tiles and numerical output at the measured K/I.
+        # Auto and explicit selection must share a specialization across
+        # both token tiles, dtypes and the measured K/I pairs.
         device = torch.device("cuda", torch.cuda.current_device())
         sms = torch.cuda.get_device_properties(device).multi_processor_count
-        for m in (1, 9):
-            x, w = self._inputs(m, 3584, 4096, torch.bfloat16)
-            chosen = _pick_hopper_tactic(m, 4096, 3584, sms, x.dtype)
-            for tactic in HOPPER_DUAL_GEMM_TACTICS:
-                _COMPILED.pop((device, x.dtype, m, 3584, 4096, tactic), None)
-            self._check(x, w)
-            key = (device, x.dtype, m, 3584, 4096, chosen)
-            specialization = _COMPILED[key]
-            explicit = hopper_dual_gemm_swiglu(x, w, chosen)
-            self._check(x, w, explicit)
-            self.assertIs(_COMPILED[key], specialization)
-            self.assertNotIn((device, x.dtype, m, 3584, 4096, -1), _COMPILED)
+        for k, n in ((2048, 7168), (4096, 3584), (4096, 7168)):
+            for dtype in (torch.bfloat16, torch.float16):
+                for m in (1, 9):
+                    with self.subTest(m=m, k=k, n=n, dtype=dtype):
+                        x, w = self._inputs(m, n, k, dtype)
+                        chosen = _pick_hopper_tactic(m, k, n, sms, x.dtype)
+                        for tactic in HOPPER_DUAL_GEMM_TACTICS:
+                            _COMPILED.pop((device, x.dtype, m, n, k, tactic), None)
+                        self._check(x, w)
+                        key = (device, x.dtype, m, n, k, chosen)
+                        specialization = _COMPILED[key]
+                        explicit = hopper_dual_gemm_swiglu(x, w, chosen)
+                        self._check(x, w, explicit)
+                        self.assertIs(_COMPILED[key], specialization)
+                        self.assertNotIn((device, x.dtype, m, n, k, -1), _COMPILED)
 
     def test_torch_compile_uses_custom_op_fake_contract(self):
         x, w = self._inputs(8, 3584, 4096, torch.bfloat16)
