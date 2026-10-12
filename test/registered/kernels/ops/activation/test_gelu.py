@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from sglang.kernels.ops.activation.gelu import new_gelu, quick_gelu
+from sglang.kernels.ops.activation.gelu import _gelu_module, new_gelu, quick_gelu
 from sglang.test.ci.ci_register import register_cuda_ci
 
 register_cuda_ci(est_time=25, stage="base-b-kernel-unit", runner_config="1-gpu-large")
@@ -121,6 +121,37 @@ def test_gelu_compile_and_graph_replay(fn, dtype):
     x.neg_()
     graph.replay()
     assert_result(fn, x, out)
+
+
+@pytest.mark.parametrize("fn", OPS)
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("offset", [0, 1])
+def test_gelu_bounded_grid_and_graph_replay(fn, dtype, offset):
+    # Multiple grid-stride iterations, a partial final vector, and guard elements.
+    size = 2**22 + 7
+    x = torch.randn(size + 2, device="cuda", dtype=dtype)[offset : offset + size]
+    backing = torch.full((size + 2,), float("nan"), device="cuda", dtype=dtype)
+    out = backing[offset : offset + size]
+    module = _gelu_module(
+        dtype, fn is quick_gelu, scalar_small=False, grid_mode="persistent"
+    )
+    module.run(x, out)
+    assert_result(fn, x, out)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        module.run(x, out)
+    x.neg_()
+    graph.replay()
+    assert_result(fn, x, out)
+    assert torch.isnan(backing[:offset]).all()
+    assert torch.isnan(backing[offset + size :]).all()
+
+
+@pytest.mark.parametrize("fn", OPS)
+@pytest.mark.parametrize("size", [2**24 - 1, 2**24, 2**24 + 7])
+def test_gelu_bounded_dispatch_boundary(fn, size):
+    x = torch.randn(size, device="cuda", dtype=torch.float16)
+    assert_result(fn, x, fn(x))
 
 
 @pytest.mark.parametrize(

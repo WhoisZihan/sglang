@@ -22,10 +22,16 @@ def _gelu_module(
     quick: bool,
     scalar_small: bool = True,
     force_scalar: bool = False,
+    grid_mode: str = "auto",
 ) -> Module:
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise RuntimeError(f"Unsupported GELU dtype: {dtype}")
-    args = make_cpp_args(dtype, quick, is_arch_support_pdl(), scalar_small)
+    grid_modes = {"auto": 0, "ordinary": 1, "persistent": 2}
+    if grid_mode not in grid_modes:
+        raise ValueError(f"Unsupported GELU grid mode: {grid_mode}")
+    args = make_cpp_args(
+        dtype, quick, is_arch_support_pdl(), scalar_small, grid_modes[grid_mode]
+    )
     if force_scalar:
         scalar_args = make_cpp_args(dtype, quick, is_arch_support_pdl(), 1)
         wrapper = f"launch_gelu<{scalar_args}>"
