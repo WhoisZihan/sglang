@@ -129,11 +129,16 @@ IDs are local to Hopper. Historical zero-based logs map as `0 -> 2`,
 `0 -> 1`, `1 -> 2`, `4 -> 3`. New JSONL metadata declares
 `tactic_schema=hopper_one_based_v1` and includes the ID-to-configuration map.
 
-Default calls (`tactic=-1`) select tactic 3 for BF16, K=4096, I=3584 and
-M=1..16 on a 114-SM Hopper GPU. This policy is calibrated from H100 PCIe
-measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 3
-with both rotation counts. Other SM counts, FP16, and unmeasured K/I retain
-tactic 2; the measured I=14336 cases also favored tactic 2. This is a host-side
+Default calls (`tactic=-1`) select tactic 3 for BF16/FP16, M=1..16,
+and exact `(K,I)` pairs `(2048,7168)`, `(4096,3584)`, `(4096,7168)` on a
+114-SM Hopper GPU. This policy is calibrated from H100 PCIe measurements:
+the three-run representative scan at M=1/8/9/16 and rotation=4 favored
+tactic 3 for every dtype/M at these pairs. Earlier K=4096/I=3584 results
+also covered M=2/4 and rotation=1. Other SM counts, unsupported dtypes,
+and unmeasured K/I retain tactic 2; the measured `(4096,14336)`,
+`(4096,18944)` and `(8192,14336)` pairs also favored tactic 2. The rule
+does not extrapolate to all I<=7168 or to H100 SXM/NVL, H20 or H200.
+This is a host-side
 rule with no timed autotuning or device synchronization in forward. Explicit
 tactics continue to override the rule, and auto/explicit calls share the same
 compiled specialization cache. Benchmark records include both the requested
