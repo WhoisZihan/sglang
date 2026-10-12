@@ -28,12 +28,12 @@ from sglang.srt.utils.common import direct_register_custom_op
 MAX_HOPPER_DUAL_GEMM_TOKENS = 16
 # (features, reduction, stages). Exposed for offline performance selection;
 # benchmark all tactics before admitting a shape to the model fast path.
-# Match Blackwell BF16/FP16 single-CTA IDs; 2/3 are reserved for its
-# two-CTA MMA configurations. ID 4 is the Hopper-specific K=64 candidate.
+# Hopper uses consecutive one-based IDs: wide K=128, narrow K=128,
+# and narrow K=64. IDs are local to this backend, not Blackwell tactic IDs.
 HOPPER_DUAL_GEMM_TACTICS = {
-    0: (128, 128, 3),
-    1: (64, 128, 3),
-    4: (64, 64, 5),
+    1: (128, 128, 3),
+    2: (64, 128, 3),
+    3: (64, 64, 5),
 }
 _COMPILED = {}
 
@@ -46,9 +46,9 @@ def _pick_hopper_tactic(
     input_dtype: torch.dtype,
 ) -> int:
     """Select an offline-measured tactic without tuning inside forward."""
-    # H100 PCIe (114 SMs), BF16, K=4096: tactic 4 beat tactic 1 for
+    # H100 PCIe (114 SMs), BF16, K=4096: tactic 3 beat tactic 2 for
     # I=3584 at M=1/2/4/8/9/16 with both one and four rotating weight sets.
-    # I=14336 favored tactic 1. Keep the original default for unmeasured
+    # I=14336 favored tactic 2. Keep the original default for unmeasured
     # widths, reductions, dtypes and SM counts (including H20/H200).
     if (
         1 <= num_tokens <= MAX_HOPPER_DUAL_GEMM_TOKENS
@@ -57,8 +57,8 @@ def _pick_hopper_tactic(
         and multiprocessor_count == 114
         and input_dtype == torch.bfloat16
     ):
-        return 4
-    return 1
+        return 3
+    return 2
 
 
 class HopperDualGemmKernel:
@@ -408,5 +408,5 @@ direct_register_custom_op(
 def hopper_dual_gemm_swiglu(
     x: torch.Tensor, gate_up_weight: torch.Tensor, tactic: int = -1
 ) -> torch.Tensor:
-    """FP16/BF16 decode DualGEMM; -1 selects automatically, 0/1/4 override."""
+    """FP16/BF16 decode DualGEMM; -1 selects automatically, 1/2/3 override."""
     return torch.ops.sglang.cutedsl_hopper_dual_gemm_swiglu(x, gate_up_weight, tactic)
