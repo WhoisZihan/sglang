@@ -91,7 +91,7 @@ def main():
         "cuda": torch.version.cuda,
         "cutlass": cutlass.__version__,
         "backend": "cute_dsl_sm90a_tma_warp_specialized",
-        "tactic_schema": "hopper_blackwell_aligned_v1",
+        "tactic_schema": "hopper_one_based_v1",
         "tactics": HOPPER_DUAL_GEMM_TACTICS,
         "dtype": args.dtype,
         "rotation": args.rotation,

@@ -68,7 +68,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh debug /tmp/h20-dualgemm-debug
 
 This runs four separate processes under compute-sanitizer memcheck, retaining
 line information, PTX and CUBIN. The first reproduces BF16 M=1, I=65, K=128,
-tactic 1 (legacy ID 0). The second removes dynamic register redistribution only. The last
+tactic 2 (legacy ID 0). The second removes dynamic register redistribution only. The last
 two use M=8, I=64 to remove feature/token padding, with and without register
 redistribution. TMA, WGMMA, warp specialization and the pipeline remain active
 in all cases. These are diagnostic variants, not performance measurements.
@@ -117,23 +117,23 @@ BENCH_RUNS=3 BENCH_DTYPES="bf16 fp16" \
 ```
 
 The sweep covers M=1/2/4/8/9/16, hidden=4096, intermediate=14336/3584, rotation
-1/4, auto dispatch (`tactic=-1`), and explicit tactics 0/1/4. Tactics are
+1/4, auto dispatch (`tactic=-1`), and explicit tactics 1/2/3. Tactics are
 `(features, reduction, stages)`:
 
-- 0: `(128, 128, 3)` — Blackwell wide single-CTA ID
-- 1: `(64, 128, 3)` — Blackwell narrow single-CTA ID
-- 4: `(64, 64, 5)` — Hopper-specific candidate
+- 1: `(128, 128, 3)` — wide CTA
+- 2: `(64, 128, 3)` — narrow CTA
+- 3: `(64, 64, 5)` — narrow CTA with a shorter K tile
 
-IDs 2/3 are reserved for Blackwell two-CTA MMA and rejected on Hopper.
-Historical Hopper logs use legacy IDs: `0 -> 1`, `1 -> 0`, `2 -> 4`.
-New JSONL metadata declares `tactic_schema=hopper_blackwell_aligned_v1` and
-uses an ID-to-configuration map rather than a positional list.
+IDs are local to Hopper. Historical zero-based logs map as `0 -> 2`,
+`1 -> 1`, `2 -> 3`; the short-lived Blackwell-aligned IDs map as
+`0 -> 1`, `1 -> 2`, `4 -> 3`. New JSONL metadata declares
+`tactic_schema=hopper_one_based_v1` and includes the ID-to-configuration map.
 
-Default calls (`tactic=-1`) select tactic 4 for BF16, K=4096, I=3584 and
+Default calls (`tactic=-1`) select tactic 3 for BF16, K=4096, I=3584 and
 M=1..16 on a 114-SM Hopper GPU. This policy is calibrated from H100 PCIe
-measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 4
+measurements at M=1/2/4/8/9/16: all complete-MLP comparisons favored tactic 3
 with both rotation counts. Other SM counts, FP16, and unmeasured K/I retain
-tactic 1; the measured I=14336 cases also favored tactic 1. This is a host-side
+tactic 2; the measured I=14336 cases also favored tactic 2. This is a host-side
 rule with no timed autotuning or device synchronization in forward. Explicit
 tactics continue to override the rule, and auto/explicit calls share the same
 compiled specialization cache. Benchmark records include both the requested
@@ -162,6 +162,33 @@ There is also a CI benchmark using the repository marker's L2-aware rotation:
 python test/registered/kernels/benchmark/gemm/bench_hopper_dual_gemm.py
 ```
 
+## Representative performance scan
+
+```bash
+BENCH_RUNS=3 bash test/manual/kernels/run_hopper_dual_gemm.sh bench-scan /tmp/hopper-size-scan
+```
+
+This separate stage leaves `bench` and `all` unchanged. It measures these six
+K/I pairs rather than their Cartesian product:
+
+| K | I | Purpose |
+|---:|---:|---|
+| 4096 | 3584 | Existing small-width anchor |
+| 4096 | 7168 | Intermediate width; 56 wide CTAs on the 114-SM H100 |
+| 4096 | 14336 | Existing near-one-wave anchor; 112 wide CTAs |
+| 4096 | 18944 | Above one wide-CTA wave; 148 wide CTAs |
+| 2048 | 7168 | Shorter reduction at the same intermediate width |
+| 8192 | 14336 | Longer reduction at the same near-one-wave width |
+
+Each pair runs M=1/8/9/16, covering single-token decode and both sides of the
+token-tile boundary. Rotation is fixed at 4 to keep the sweep small. BF16 and
+FP16, auto and explicit tactics 1/2/3 are all included, with the same front and
+full-MLP correctness checks before timing. One run produces 192 rows in 12
+processes; three runs produce 576 rows. Set `BENCH_DTYPES=bf16` for a half-sized
+first pass. Filenames include K and I so different reductions cannot overwrite
+one another. New results should calibrate dispatch; the scan does not modify
+the existing measured selection policy.
+
 ## Sanitizers, profiling and return files
 
 ```bash
@@ -169,7 +196,7 @@ bash test/manual/kernels/run_hopper_dual_gemm.sh sanitizer /tmp/h20-dualgemm-dsl
 # Profile one configuration and inspect registers, spills, memory and stalls.
 ncu --set full --target-processes all \
   python test/manual/kernels/bench_hopper_dual_gemm.py \
-  --tokens 8 --tactics 1 --intermediate 14336 --rotation 4 --repetitions 1
+  --tokens 8 --tactics 2 --intermediate 14336 --rotation 4 --repetitions 1
 
 tar -czf /tmp/h20-dualgemm-dsl-results.tar.gz -C /tmp h20-dualgemm-dsl
 ```

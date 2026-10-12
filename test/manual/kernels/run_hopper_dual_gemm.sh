@@ -5,18 +5,20 @@ set -euo pipefail
 usage() {
     cat <<'EOF'
 Usage: bash test/manual/kernels/run_hopper_dual_gemm.sh STAGE [OUTPUT_DIR]
-Stages: check, compile, debug, unit, bench, sanitizer, all
+Stages: check, compile, debug, unit, bench, bench-scan, sanitizer, all
 all = check + compile + unit + bench; sanitizer is explicitly requested.
 Environment: CUDA_VISIBLE_DEVICES (default 0), PYTHON (default python),
 BENCH_RUNS (default 1), BENCH_DTYPES (default bf16), REPETITIONS (default 50).
 bench tests TP1/TP4 local widths, rotation 1/4, tokens 1/2/4/8/9/16, auto dispatch and all three explicit tactics.
+bench-scan tests six representative K/I pairs, tokens 1/8/9/16, rotation 4,
+and defaults to both bf16/fp16; BENCH_DTYPES and BENCH_RUNS override these.
 EOF
 }
 
 stage="${1:-all}"
 case "$stage" in
     -h|--help) usage; exit 0 ;;
-    check|compile|debug|unit|bench|sanitizer|all) ;;
+    check|compile|debug|unit|bench|bench-scan|sanitizer|all) ;;
     *) usage; exit 2 ;;
 esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -165,6 +167,24 @@ bench() {
                         --rotation "$rotation" --repetitions "${REPETITIONS:-50}" \
                         --output "$out/$name.jsonl"
                 done
+            done
+        done
+    done
+}
+
+bench-scan() {
+    local dtype shape hidden width run name
+    for dtype in ${BENCH_DTYPES:-bf16 fp16}; do
+        # Change one dimension at a time; avoid a Cartesian product.
+        for shape in "4096 3584" "4096 7168" "4096 14336" "4096 18944" \
+            "2048 7168" "8192 14336"; do
+            read -r hidden width <<< "$shape"
+            for ((run=1; run<=${BENCH_RUNS:-1}; run++)); do
+                name="bench-scan-${dtype}-k${hidden}-i${width}-rotation4-run${run}"
+                run_logged "$name" "$py" test/manual/kernels/bench_hopper_dual_gemm.py \
+                    --tokens 1 8 9 16 --hidden "$hidden" --intermediate "$width" \
+                    --dtype "$dtype" --rotation 4 --repetitions "${REPETITIONS:-50}" \
+                    --output "$out/$name.jsonl"
             done
         done
     done
