@@ -29,11 +29,12 @@ MAX_HOPPER_DUAL_GEMM_TOKENS = 16
 # (features, reduction, stages). Exposed for offline performance selection;
 # benchmark all tactics before admitting a shape to the model fast path.
 # Hopper uses consecutive one-based IDs: wide K=128, narrow K=128,
-# and narrow K=64. IDs are local to this backend, not Blackwell tactic IDs.
+# narrow K=64, and wide K=64. IDs are local to this backend.
 HOPPER_DUAL_GEMM_TACTICS = {
     1: (128, 128, 3),
     2: (64, 128, 3),
     3: (64, 64, 5),
+    4: (128, 64, 3),
 }
 _COMPILED = {}
 
